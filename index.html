@@ -41,6 +41,7 @@
         <label class="sort">
           <span class="sr-only">Sorter</span>
           <select id="offer-sort">
+            <option value="fordeg">For deg</option>
             <option value="relevans">Kjede A–Å</option>
             <option value="pris">Laveste pris</option>
             <option value="enhet">Laveste kilo-/literpris</option>
@@ -50,6 +51,10 @@
       </div>
       <div class="chips" id="chain-chips" role="group" aria-label="Filtrer på kjede"></div>
       <div class="chips" id="cat-chips" role="group" aria-label="Filtrer på kategori"></div>
+      <section id="for-deg" class="for-deg" hidden aria-labelledby="for-deg-h">
+        <h2 id="for-deg-h">Tilbud for deg</h2>
+        <ul id="for-deg-list"></ul>
+      </section>
       <p class="count" id="offer-count"></p>
       <ul class="offers" id="offer-list"></ul>
       <button id="offer-more" class="btn btn-ghost wide" type="button" hidden>Vis flere</button>

@@ -51,3 +51,12 @@ GitHub Pages fra `main` (rot). `git push` → Pages bygger på ~1 min. Ved endri
 ## Status
 Fase 1 (tilbud + handleliste + PWA) og app-delen av fase 2 (forbruk, import, kategorimotor, backup) er bygget og testet
 headless. Venter på: test på Oles iPhone, ekte kvitteringsdata (Trumf-innsyn / REMA-token). Se `plan.md`.
+
+## Tilbud for deg (læring)
+`js/profile.js` bygger en profil av kvitteringene: hvert produkt du kjøper får en vekt (antall kjøp, halvert per 120 dager),
+og ordene i navnet vektes med IDF, slik at merkenavn som går igjen på mange varer («Tine») teller mindre enn ordet som sier
+hva varen er («helmelk»). Et tilbud må dekke minst halvparten av et produkts ord for å telle. Det gir stripa
+«Tilbud for deg», sorteringen «For deg» og linja «Du kjøper ofte …». Profilen bygges på telefonen, og ingenting sendes noe sted.
+
+## Skjule kjeder
+Mer → Kjeder: kryss vekk kjeder du ikke bruker. De forsvinner fra tilbud, filtre og handlelistens tilbudsmatching.

@@ -1,9 +1,10 @@
 import * as db from './db.js';
 import { fetchOffers, TRONDHEIM } from './tjek.js';
 import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categories.js';
+import { buildProfile, scoreOffer } from './profile.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 
@@ -26,9 +27,9 @@ const state = {
   categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
   rules: [],
   receipts: [],
-  settings: { chains: [], sync: { repo: 'olecny/matkassa-data', path: 'spending.json', token: '', lastSync: null, lastError: null } },
+  settings: { chains: [], hiddenChains: [], sync: { repo: 'olecny/matkassa-data', path: 'spending.json', token: '', lastSync: null, lastError: null } },
   q: '',
-  sort: 'relevans',
+  sort: 'fordeg',
   cat: null,
   shown: PAGE,
   month: todayISO().slice(0, 7),
@@ -65,10 +66,53 @@ function rebuildOfferIndex() {
 }
 
 const catById = (id) => state.categories.find((c) => c.id === id);
+const hiddenChains = () => new Set(state.settings.hiddenChains || []);
 const activeOffers = () => {
   const now = Date.now();
-  return offerIndex.filter((x) => !x.o.till || x.o.till >= now);
+  const hidden = hiddenChains();
+  return offerIndex.filter((x) => (!x.o.till || x.o.till >= now) && !hidden.has(x.o.chainId));
 };
+
+/* ---------- personal fit: learn from receipts ---------- */
+const FIT_MIN = 0.2; // below this an offer isn't "for you"
+let profile = null;
+let profileFor = null; // receipts array the profile was built from
+let fitFor = null; // offerIndex the fit was computed for
+
+function ensureFit() {
+  if (profileFor !== state.receipts || profile === null) {
+    profile = buildProfile(state.receipts);
+    profileFor = state.receipts;
+    fitFor = null;
+  }
+  if (fitFor === offerIndex) return;
+  for (const x of offerIndex) {
+    const { score, because } = scoreOffer(profile, x.words);
+    x.fit = score;
+    x.because = because;
+  }
+  fitFor = offerIndex;
+}
+const hasProfile = () => profile && profile.products.length > 0;
+
+/** Top offers for the user: best fit × discount, one per bought product so the strip stays varied. */
+function featuredOffers(n = 10) {
+  ensureFit();
+  if (!hasProfile()) return [];
+  const seen = new Set();
+  const out = [];
+  const now = Date.now();
+  const ranked = activeOffers()
+    .filter((x) => x.fit >= FIT_MIN && (!x.o.from || x.o.from <= now))
+    .sort((a, b) => b.fit * (1 + discount(b.o)) - a.fit * (1 + discount(a.o)));
+  for (const x of ranked) {
+    if (seen.has(x.because.name)) continue;
+    seen.add(x.because.name);
+    out.push(x);
+    if (out.length === n) break;
+  }
+  return out;
+}
 
 /* ---------- toast ---------- */
 let toastTimer;
@@ -110,7 +154,7 @@ function renderStatus() {
   if (state.loading) el.textContent = state.loading;
   else if (state.error && d) el.textContent = `Viser lagrede tilbud fra ${timeFmt.format(d.fetchedAt)} · ${state.error}`;
   else if (state.error) el.textContent = state.error;
-  else if (d) el.textContent = `${activeOffers().length} tilbud fra ${d.chains.length} kjeder · oppdatert ${timeFmt.format(d.fetchedAt)}`;
+  else if (d) el.textContent = `${activeOffers().length} tilbud fra ${d.chains.filter((c) => !hiddenChains().has(c.id)).length} kjeder · oppdatert ${timeFmt.format(d.fetchedAt)}`;
   else el.textContent = '';
   $('#refresh').classList.toggle('spinning', !!state.loading);
 }
@@ -147,7 +191,9 @@ async function loadOffers(force = false) {
 }
 
 function filteredOffers() {
-  const chains = new Set(state.settings.chains || []);
+  ensureFit();
+  const hidden = hiddenChains();
+  const chains = new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
   const qTokens = tokens(state.q);
   let list = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!state.cat || x.cat === state.cat));
   if (qTokens.length) {
@@ -161,6 +207,7 @@ function filteredOffers() {
     pris: (a, b) => a.o.price - b.o.price,
     enhet: (a, b) => (a.o.unitPrice ?? 1e9) - (b.o.unitPrice ?? 1e9),
     rabatt: (a, b) => discount(b.o) - discount(a.o),
+    fordeg: hasProfile() ? (a, b) => (b.fit || 0) - (a.fit || 0) || discount(b.o) - discount(a.o) : null,
   }[state.sort];
   if (by) list = [...list].sort(by);
   else if (!qTokens.length) list = [...list].sort((a, b) => a.o.chain.localeCompare(b.o.chain, 'nb'));
@@ -206,7 +253,7 @@ function inList(offerId) {
   return state.list.some((i) => i.offer && i.offer.id === offerId && !i.done);
 }
 
-function offerCard({ o }) {
+function offerCard({ o, fit, because }) {
   const added = inList(o.id);
   const img = o.img
     ? `<img class="thumb" src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb none',textContent:'Bilde'}))">`
@@ -217,6 +264,7 @@ function offerCard({ o }) {
       <div class="title">${esc(titleCase(o.title))}</div>
       ${o.desc ? `<div class="desc">${esc(o.desc)}</div>` : ''}
       <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span><span>${validText(o)}</span></div>
+      ${fit >= FIT_MIN && because ? `<div class="why">Du kjøper ofte ${esc(because.name)} (${because.n}×)</div>` : ''}
     </div>
     <div class="priceblock">
       <span class="price">${kr(o.price)}</span>
@@ -227,10 +275,23 @@ function offerCard({ o }) {
   </li>`;
 }
 
+function featCard({ o, because }) {
+  const added = inList(o.id);
+  return `<li class="feat">
+    ${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
+    <div class="ft">${esc(titleCase(o.title))}</div>
+    <div class="fp">${kr(o.price)}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
+    <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></div>
+    <div class="why">${esc(because.name)} · ${because.n}×</div>
+    <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}">${added ? '✓' : '+'}</button>
+  </li>`;
+}
+
 function renderChips() {
   const d = state.offersData;
-  const sel = new Set(state.settings.chains || []);
-  const chains = d ? d.chains : [];
+  const hidden = hiddenChains();
+  const sel = new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
+  const chains = d ? d.chains.filter((c) => !hidden.has(c.id)) : [];
   $('#chain-chips').innerHTML =
     `<button class="chip" type="button" data-chain="" aria-pressed="${sel.size === 0}">Alle kjeder</button>` +
     chains
@@ -263,6 +324,9 @@ function renderOffers() {
     return;
   }
   const list = filteredOffers();
+  const feat = !state.q && !state.cat ? featuredOffers() : [];
+  $('#for-deg').hidden = !feat.length;
+  $('#for-deg-list').innerHTML = feat.map(featCard).join('');
   $('#offer-count').textContent = `${list.length} tilbud${state.q ? ` for «${state.q}»` : ''}`;
   listEl.innerHTML = list.slice(0, state.shown).map(offerCard).join('');
   more.hidden = list.length <= state.shown;
@@ -280,7 +344,8 @@ function dealsFor(text) {
   const q = tokens(text).filter((t) => t.length >= 2 && !STOP.has(t) && !/^\d+$/.test(t));
   if (!q.length) return [];
   const now = Date.now();
-  const chains = new Set(state.settings.chains || []);
+  const hidden = hiddenChains();
+  const chains = new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
   const itemCat = classify(text); // "melk" → Meieri, so milk beats "potetmos med melk"
   return activeOffers()
     .filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!x.o.from || x.o.from <= now + 7 * 864e5))
@@ -686,6 +751,10 @@ function renderMore() {
         ${state.settings.sync.lastError ? `<dt>Feil</dt><dd>${esc(state.settings.sync.lastError)}</dd>` : ''}
       </dl>
     </div>
+    <div class="card"><h2>Kjeder</h2>
+      <p class="hint" style="margin-top:0">Skjulte kjeder vises ikke i tilbud, filtre eller handlelisten.</p>
+      ${state.offersData ? `<div class="chain-toggles">${[...state.offersData.chains].sort((a, b) => a.name.localeCompare(b.name, 'nb')).map((c) => `<label class="toggle"><input type="checkbox" data-chainshow="${esc(c.id)}" ${hiddenChains().has(c.id) ? '' : 'checked'}><span class="dot" style="--c:${esc(chainColor(c.id, c.color))}"></span>${esc(c.name)}</label>`).join('')}</div>` : '<p class="hint">Kjedene vises når tilbudene er hentet.</p>'}
+    </div>
     <div class="card"><h2>Kategorier</h2>
       <div id="cat-list">${state.categories.map((c) => `<div class="cat-row">
         <input type="color" value="${esc(c.color)}" data-catcolor="${esc(c.id)}" aria-label="Farge for ${esc(c.name)}">
@@ -869,6 +938,14 @@ function bind() {
 
   $('#view-mer').addEventListener('change', (e) => {
     const t = e.target;
+    if (t.dataset.chainshow) {
+      const hidden = hiddenChains();
+      if (t.checked) hidden.delete(t.dataset.chainshow);
+      else hidden.add(t.dataset.chainshow);
+      state.settings.hiddenChains = [...hidden];
+      save.settings();
+      return;
+    }
     if (t.dataset.catname) {
       const c = catById(t.dataset.catname);
       const name = t.value.trim();
