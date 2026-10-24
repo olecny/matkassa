@@ -3,18 +3,24 @@
 Norsk PWA for iPhone: **ukens mattilbud**, **handleliste** som sier fra når en vare er på tilbud, og
 **matforbruk** per måned og kategori. Arbeidsnavn «Matkassa». Plan: [`plan.md`](plan.md).
 
-**Live:** https://olecny.github.io/matkassa/
+**Live:** https://olecny.github.io/matkassa/ · Premium-kopi for sammenligning: https://olecny.github.io/matkassa-premium/
+(`../matkassa-premium/`, samme funksjoner, mer «premium» utseende og bevegelse, egen lagring)
 
 ## Bruk
 - **Installer:** åpne lenken i Safari → Del → *Legg til på Hjem-skjerm*.
-- **Tilbud:** henter alle aktive kundeaviser fra 14 dagligvarekjeder via Tjek (eTilbudsavis), rundt valgt område
-  (Mer → Område: by eller *Bruk min posisjon*; standard Trondheim).
+- **Område:** første gang appen åpnes uten valgt område, spør den om posisjonen én gang (avrundet til ca. 1 km, lagres
+  bare på enheten). Sier du nei, eller den feiler, brukes Trondheim. Svarer ikke telefonen uten et trykk (iOS), vises
+  kortet «Finn tilbud nær deg» med en knapp. Du blir ikke spurt på nytt ved hver start. Bytt når som helst i Mer → Område.
+  Har du allerede valgt område, endres ingenting.
+- **Tilbud:** henter alle aktive kundeaviser fra 14 dagligvarekjeder via Tjek (eTilbudsavis), rundt valgt område.
   Søk, filtrer på kjede (huskes) og kategori, sorter på pris, kilo-/literpris eller rabatt. Trykk **+** for å legge i handlelisten.
   Tilbudene lagres på telefonen og vises også uten nett. Oppdateres automatisk når de er over 6 timer gamle, eller med ↻.
 - **Handleliste:** legg til, kryss av, slett. Hver vare får «På tilbud hos KIWI – 19,90 kr» hvis noe matcher denne uken (trykk for flere).
   Virker offline.
 - **Forbruk:** *Importer fil* (Trumf-innsyn JSON, `spending.json`, Matkassa-backup) eller *Ny kvittering* for hånd.
   Viser måned, per kategori, siste 12 måneder, en kø med ukategoriserte varer (velg kategori → ny regel) og kvitteringene.
+- **Ukentlig synk:** Mac-en kjører `ingest/sync.sh` hver søndag kl. 20:00 via launchd (kvitteringer + REMA-tilbud til
+  det private datarepoet). Status: `cat ingest/logs/last-run.txt`. Se [ingest/README.md](ingest/README.md#automatisk-hver-uke-launchd).
 - **Mer:** synk fra ditt eget private repo (valgfritt, se [ingest/README.md](ingest/README.md)), område, skjul kjeder, rediger kategorier (navn, farge, legg til, slett), se/slett regler, eksporter/importer backup.
 
 Alle data ligger i IndexedDB på enheten (`navigator.storage.persist()` blir forespurt). Ta backup jevnlig;
@@ -45,7 +51,7 @@ Ingen byggesteg, ingen avhengigheter: vanilla HTML/CSS/JS-moduler.
 | `js/spending.js` | Import (Trumf / spending.json / backup), sammenslåing, fordeling per kategori |
 | `js/db.js` | Liten IndexedDB-nøkkel/verdi-lagring |
 | `sw.js`, `manifest.webmanifest`, `icons/` | PWA: app-skall og tilbudsbilder caches |
-| `ingest/` | Mac-side: `rema.py`, `sync.sh` og formatene `spending.json` / `rema-offers.json` ([ingest/README.md](ingest/README.md)) |
+| `ingest/` | Mac-side: `rema.py`, `sync.sh`, `launchd/` (ukentlig jobb) og formatene `spending.json` / `rema-offers.json` ([ingest/README.md](ingest/README.md)) |
 | `test/` | `unit.test.mjs`, `e2e.mjs`, `privacy.sh`, `fake/*-FAKE.json` (oppdiktet testdata). `test/tmp/` er git-ignorert |
 
 ## Datakilder og forbehold
@@ -56,11 +62,13 @@ Ingen byggesteg, ingen avhengigheter: vanilla HTML/CSS/JS-moduler.
 
 ## Deploy
 GitHub Pages fra `main` (rot). `git push` → Pages bygger på ~1 min. Ved endring av app-skallet: bump `VERSION` i `sw.js`
-(og `APP_VERSION` i `js/app.js`). Service workeren henter app-skallet fra nett først, men faller tilbake til cache etter 3 s,
+(og `APP_VERSION` i `js/app.js`). Cachene heter `matkassa-v*`, og service workeren sletter bare egne cacher, fordi
+Matkassa Premium deler opprinnelsen `olecny.github.io` (den bruker `matkassa-premium-*` og egen IndexedDB). Service workeren henter app-skallet fra nett først, men faller tilbake til cache etter 3 s,
 og etter én treg forespørsel serveres resten av lastingen fra cache (svakt nett i butikken).
 
 ## Status
-Fase 1–2 og 6 (strekkode, per bruker, testagent) er bygget og testet headless (enhet, e2e falsk + live, personvern).
+0.5.0: fase 1–2 og 6 (strekkode, per bruker, testagent), posisjon ved første start og ukentlig synk er bygget og testet
+headless (enhet, e2e falsk + live med falsk posisjon via CDP, personvern).
 REMA-kvitteringer er koblet til via `ingest/`. Venter på: test på Oles iPhone. Ekte flerbruker (kontoer) er fase 7. Se `plan.md`.
 
 ## Tilbud for deg (læring, per bruker)
