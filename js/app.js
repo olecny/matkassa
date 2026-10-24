@@ -3,9 +3,10 @@ import { fetchOffers, AREAS, DEFAULT_AREA } from './tjek.js';
 import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categories.js';
 import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
+import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 
@@ -28,8 +29,7 @@ const state = {
   categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
   rules: [],
   receipts: [],
-  // No personal defaults: every user points the app at their own private data repo (or none) in Mer.
-  settings: { chains: [], hiddenChains: [], area: null, sync: { repo: '', path: 'spending.json', token: '', lastSync: null, lastTry: null, lastError: null } },
+  settings: defaultSettings(), // no personal defaults (see js/settings.js)
   extraOffers: null, // {fetchedAt, source, offers} from the user's data repo (REMA Superpris with barcodes)
   q: '',
   sort: 'fordeg',
@@ -74,11 +74,19 @@ function rebuildOfferIndex() {
     cat: classify(o.title) || classify(o.title + ' ' + o.desc) || 'annet',
   }));
 }
-const area = () => state.settings.area || DEFAULT_AREA;
+const area = () => validArea(state.settings.area) || DEFAULT_AREA;
 const offerById = (id) => (offerIndex.find((x) => x.o.id === id) || {}).o;
 
 const catById = (id) => state.categories.find((c) => c.id === id);
 const hiddenChains = () => new Set(state.settings.hiddenChains || []);
+/** The offer a list item was added from, unless its chain is hidden now. */
+const linkedOffer = (item) => (item.offer && !hiddenChains().has(item.offer.chainId) ? item.offer : null);
+/** True when offers exist but every chain in them is hidden (Mer → Kjeder). */
+const allChainsHidden = () => {
+  const d = state.offersData;
+  const hidden = hiddenChains();
+  return !!(d && d.chains.length && d.chains.every((c) => hidden.has(c.id)));
+};
 /** Chain chips the user picked, minus hidden chains. Empty = all. */
 const selectedChains = () => {
   const hidden = hiddenChains();
@@ -360,7 +368,9 @@ function renderOffers() {
   more.textContent = `Vis flere (${list.length - state.shown} til)`;
   empty.hidden = list.length > 0;
   if (!list.length) {
-    empty.innerHTML = `<h2>Ingen treff</h2><p>Prøv et annet søkeord${state.cat || (state.settings.chains || []).length ? ', eller fjern filteret for kjede eller kategori' : ''}.</p>`;
+    empty.innerHTML = allChainsHidden()
+      ? '<h2>Alle kjeder er skjult</h2><p>Du har skjult alle kjedene. Slå på kjedene du handler i under Mer → Kjeder.</p><button class="btn btn-primary" type="button" data-gototab="mer">Gå til Mer → Kjeder</button>'
+      : `<h2>Ingen treff</h2><p>Prøv et annet søkeord${state.cat || (state.settings.chains || []).length ? ', eller fjern filteret for kjede eller kategori' : ''}.</p>`;
   }
 }
 
@@ -423,7 +433,7 @@ function renderBadge() {
 
 function dealHTML(item) {
   const now = Date.now();
-  if (item.offer) {
+  if (linkedOffer(item)) {
     const o = item.offer;
     const expired = o.till && o.till < now;
     if (expired && item.eans) {
@@ -453,7 +463,7 @@ function renderList() {
     )
     .join('');
   const open = state.list.filter((i) => !i.done);
-  const onSale = open.filter((i) => i.offer || dealsFor(i.text, i.eans).length).length;
+  const onSale = open.filter((i) => linkedOffer(i) || dealsFor(i.text, i.eans).length).length;
   const done = state.list.length - open.length;
   $('#list-summary').textContent = state.list.length
     ? `${open.length} igjen${state.offersData ? ` · ${onSale} på tilbud` : ''}${done ? ` · ${done} avkrysset` : ''}`
@@ -690,7 +700,7 @@ async function importFile(file) {
     state.rules = Array.isArray(b.rules) ? b.rules : [];
     state.receipts = Array.isArray(b.receipts) ? b.receipts : [];
     state.list = Array.isArray(b.list) ? b.list : [];
-    if (b.settings) state.settings = { ...state.settings, ...b.settings, sync: { ...state.settings.sync, ...(b.settings.sync || {}), token: state.settings.sync.token } };
+    if (b.settings) state.settings = mergeSettings(state.settings, b.settings, { fromBackup: true }); // keeps this device's repo + token
     await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
     rebuildClassifier();
     toast('Backup gjenopprettet');
@@ -927,6 +937,7 @@ function bind() {
       renderBadge();
     }
     if (e.target.closest('[data-action="refresh"]')) loadOffers(true);
+    if (e.target.closest('[data-gototab]')) showTab(e.target.closest('[data-gototab]').dataset.gototab);
   });
 
   $('#list-form').addEventListener('submit', (e) => {
@@ -1117,7 +1128,7 @@ async function start() {
     if (categories && categories.length) state.categories = categories;
     if (rules) state.rules = rules;
     if (receipts) state.receipts = receipts;
-    if (settings) state.settings = { ...state.settings, ...settings, sync: { ...state.settings.sync, ...(settings.sync || {}) } };
+    if (settings) state.settings = mergeSettings(state.settings, settings);
   } catch (e) {
     console.error('Lagring utilgjengelig', e);
     state.error = 'Lagring er ikke tilgjengelig i denne nettleseren';

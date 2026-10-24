@@ -5,9 +5,10 @@ import { makeClassifier, DEFAULT_CATEGORIES, tokens } from '../js/categories.js'
 import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
 import { normalizeOffer, AREAS, DEFAULT_AREA } from '../js/tjek.js';
+import { defaultSettings, mergeSettings, validArea } from '../js/settings.js';
 
 let failed = 0;
-const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) { failed++; process.exitCode = 1; } };
+const ok = (c, m, d = '') => { console.log((c ? 'PASS ' : 'FAIL ') + m + (d && !c ? ` — ${d}` : '')); if (!c) { failed++; process.exitCode = 1; } };
 const fake = (f) => JSON.parse(fs.readFileSync(new URL(`./fake/${f}`, import.meta.url)));
 const cls = makeClassifier(DEFAULT_CATEGORIES, []);
 
@@ -80,7 +81,25 @@ ok(mergeExtraOffers(tjekOffers, expired).attached === 0, 'merge: expired campaig
 ok(AREAS.length >= 5 && AREAS.includes(DEFAULT_AREA), 'areas: selectable list incl. default');
 const appSrc = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 ok(!/olecny/i.test(appSrc), 'app.js has no hard-wired personal repo');
-ok(/repo: ''/.test(appSrc), 'sync repo default is empty');
+ok(defaultSettings().sync.repo === '' && defaultSettings().area === null, 'sync repo default is empty, no area set');
+
+/* ---------- settings restore hardening (Tess finding 5) ---------- */
+const mine = { ...defaultSettings(), sync: { ...defaultSettings().sync, repo: 'me/my-data-FAKE', token: 'FAKE-TOKEN-NOT-REAL', lastSync: 5 } };
+const hostile = { chains: null, hiddenChains: 'abc', area: { name: 'X' }, sync: { repo: 'evil/other-FAKE', token: 'FAKE-OTHER', path: '../x' } };
+const restored = mergeSettings(mine, hostile, { fromBackup: true });
+ok(restored.sync.repo === 'me/my-data-FAKE' && restored.sync.token === 'FAKE-TOKEN-NOT-REAL' && restored.sync.path === 'spending.json', 'restore: backup cannot change this device\'s sync repo, path or token');
+ok(Array.isArray(restored.chains) && restored.chains.length === 0 && Array.isArray(restored.hiddenChains) && restored.hiddenChains.length === 0, 'restore: bad chains/hiddenChains become empty lists');
+ok(restored.area === null, 'restore: area without coordinates is dropped (no r_lat=undefined)');
+ok(validArea({ name: 'Bergen', lat: 60.39, lng: 5.32 }).radius === 30000 && validArea({ lat: '60', lng: 5 }) === null && validArea({ lat: 91, lng: 5 }) === null, 'validArea: numbers in range, default radius');
+const loaded = mergeSettings(defaultSettings(), { sync: { repo: 'me/my-data-FAKE', token: 'FAKE-TOKEN-NOT-REAL' }, area: AREAS[0] });
+ok(loaded.sync.repo === 'me/my-data-FAKE' && loaded.sync.token === 'FAKE-TOKEN-NOT-REAL' && loaded.area.name === 'Oslo', 'load from device storage keeps sync + area');
+ok(mergeSettings(defaultSettings(), undefined).sync.path === 'spending.json', 'missing settings → defaults');
+
+/* ---------- service worker: slow-network window (Tess finding 1) ---------- */
+const swSrc = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+ok(/slowUntil/.test(swSrc) && /if \(degraded\) return cached/.test(swSrc), 'sw: after one slow request the rest of the load is served from cache');
+const missing = fs.readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js') && !swSrc.includes(`'js/${f}'`));
+ok(!missing.length, 'sw: every js module is precached for offline', missing.join(','));
 const syncSh = fs.readFileSync(new URL('../ingest/sync.sh', import.meta.url), 'utf8');
 ok(!/olecny/i.test(syncSh) && /OFFENTLIG/.test(syncSh), 'sync.sh: no personal default, refuses public repos');
 

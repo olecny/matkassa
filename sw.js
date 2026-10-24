@@ -1,6 +1,6 @@
 // Matkassa service worker: precache the app shell, cache offer images.
 // Offer data itself is stored by the app in IndexedDB, so offers work offline too.
-const VERSION = 'matkassa-v5';
+const VERSION = 'matkassa-v6';
 const SHELL = [
   './',
   'index.html',
@@ -13,6 +13,7 @@ const SHELL = [
   'js/spending.js',
   'js/profile.js',
   'js/extra-offers.js',
+  'js/settings.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -21,6 +22,8 @@ const SHELL = [
 const IMG_CACHE = 'matkassa-img';
 const IMG_MAX = 400;
 const NET_TIMEOUT_MS = 3000;
+const SLOW_WINDOW_MS = 30000; // after a slow/failed shell request, serve the shell from cache for this long
+let slowUntil = 0;
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -46,8 +49,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
 
   // App shell: network first so updates show up at once; cache when offline or when the network is too slow
-  // (weak signal in the shop), so the app never hangs on a white screen.
+  // (weak signal in the shop), so the app never hangs on a white screen. Once one request has been slow or failed,
+  // the rest of that page load (css, js, module imports) comes straight from the cache instead of waiting 3 s each.
   if (url.origin === self.location.origin) {
+    const degraded = Date.now() < slowUntil;
     let stored = Promise.resolve();
     const net = fetch(req, { cache: 'no-cache' }).then((res) => {
       if (res.ok) {
@@ -56,13 +61,17 @@ self.addEventListener('fetch', (e) => {
       }
       return res;
     });
+    net.catch(() => { slowUntil = Date.now() + SLOW_WINDOW_MS; });
     e.waitUntil(net.then(() => stored).catch(() => null)); // keep the worker alive until the cache is refreshed
     e.respondWith(
       caches.open(VERSION).then(async (c) => {
         const cached = (await c.match(req, { ignoreSearch: true })) || (req.mode === 'navigate' ? await c.match('index.html') : undefined);
         if (!cached) return net.catch(() => Response.error());
-        const slow = new Promise((resolve) => setTimeout(() => resolve(cached), NET_TIMEOUT_MS));
-        return Promise.race([net.catch(() => cached), slow]);
+        if (degraded) return cached; // still refreshed in the background via waitUntil above
+        const started = Date.now();
+        const slow = new Promise((resolve) => setTimeout(() => { slowUntil = Date.now() + SLOW_WINDOW_MS; resolve(cached); }, NET_TIMEOUT_MS));
+        const fresh = net.then((res) => { if (Date.now() - started < NET_TIMEOUT_MS) slowUntil = 0; return res; }, () => cached);
+        return Promise.race([fresh, slow]);
       }),
     );
     return;

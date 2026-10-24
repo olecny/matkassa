@@ -84,8 +84,10 @@ function fakeResponse(url, headers, method = 'GET') {
 /* ---------- static server for the app ---------- */
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 let serverUp = true;
-const server = http.createServer((req, res) => {
+let stallMs = 0; // > 0: every app-shell response is delayed (weak signal in the shop)
+const server = http.createServer(async (req, res) => {
   if (!serverUp) { req.socket.destroy(); return; }
+  if (stallMs) await sleep(stallMs);
   let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (p.endsWith('/')) p += 'index.html';
   const f = path.join(ROOT, p);
@@ -293,6 +295,16 @@ try {
     return blob ? await blob.text() : '';`);
   check(backup.length > 100 && !backup.includes(FAKE_TOKEN) && backup.includes(FAKE_REPO), 'backup: exported without the GitHub token');
 
+  // 4b. Restoring a hostile/edited backup can't move this device's sync to another repo or break the area
+  const hostile = JSON.parse(backup);
+  hostile.settings = { ...hostile.settings, chains: null, hiddenChains: 'abc', area: { name: 'Uten koordinater (FAKE)' }, sync: { repo: 'evil/other-repo-FAKE', token: 'FAKE-OTHER-TOKEN', path: '../x' } };
+  const hostileFile = path.join(OUT, 'backup-hostile-FAKE.json');
+  fs.writeFileSync(hostileFile, JSON.stringify(hostile));
+  await importFixture(hostileFile);
+  const st = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('matkassa'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('settings'); q.onsuccess = () => r(q.result); });`);
+  check(st.sync.repo === FAKE_REPO && st.sync.token === FAKE_TOKEN && st.sync.path === 'spending.json', 'restore: backup cannot change this device\'s sync repo/token/path');
+  check(st.area === null && Array.isArray(st.chains) && Array.isArray(st.hiddenChains), 'restore: broken area/chains in a backup are sanitised');
+
   // 5. Learning: "Tilbud for deg", EAN vs name
   await tab('tilbud');
   check(await waitFor(`!document.querySelector('#for-deg').hidden`), '"Tilbud for deg" appears after receipts are synced');
@@ -320,10 +332,37 @@ try {
   await evaluate(`const li = [...document.querySelectorAll('#offer-list .offer')].find(li => /KJELDSBERG/i.test(li.textContent)) || document.querySelector('#offer-list .offer'); li.querySelector('[data-add]').click(); return true;`);
   const item = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('matkassa'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('list'); q.onsuccess = () => r(q.result.find(i => /Kjeldsberg/i.test(i.text))); });`);
   fixtureCheck(item && item.eans && item.eans.includes('2000000000015'), 'list: item added from an offer remembers its barcode');
+
+  // 7b. Hiding the chain of an offer-linked list item hides its "Tilbud hos …" too (Tess finding 4)
+  const linkedChain = item && item.offer ? item.offer.chainId : null;
+  const linkedName = item && item.offer ? item.offer.chain : '';
+  await tab('mer');
+  await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
+  await tab('liste');
+  const linkedText = await evaluate(`return [...document.querySelectorAll('#list-items .item')].find(li => li.textContent.includes(${JSON.stringify((item && item.text) || '')}))?.textContent || '';`);
+  check(linkedChain && linkedText && !linkedText.includes(`hos ${linkedName}`), 'list: offer-linked item stops showing a hidden chain', linkedText.replace(/\s+/g, ' ').trim().slice(0, 80));
+  await tab('mer');
+  await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
+
+  // 7c. All chains hidden → helpful empty state with a way back (Tess finding 3)
+  await evaluate(`for (const cb of document.querySelectorAll('[data-chainshow]')) if (cb.checked) cb.click(); return true;`);
+  await tab('tilbud');
+  const emptyText = await evaluate(`return document.querySelector('#offer-empty').hidden ? '' : document.querySelector('#offer-empty').textContent;`);
+  check(/Alle kjeder er skjult/.test(emptyText) && /Mer → Kjeder/.test(emptyText), 'all chains hidden: empty state says so and points to Mer → Kjeder');
+  await click('#offer-empty [data-gototab="mer"]');
+  check(await evaluate(`return !document.querySelector('#view-mer').hidden;`), 'all chains hidden: button opens Mer');
+  await evaluate(`for (const cb of document.querySelectorAll('[data-chainshow]')) if (!cb.checked) cb.click(); return true;`);
   await tab('liste');
   check(await noHScroll(), 'liste: no horizontal scroll');
   await a11yAudit('liste');
   await shot('05-liste');
+
+  // 7d. Narrow phone (iPhone SE 1st gen, 320 px): no sideways scroll on any tab (Tess finding 2)
+  await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 568, deviceScaleFactor: 2, mobile: true }, S);
+  for (const t of ['tilbud', 'liste', 'forbruk', 'mer']) { await tab(t); check(await noHScroll(), `320 px: no horizontal scroll on ${t}`); }
+  await tab('tilbud');
+  await shot('05b-tilbud-320');
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }, S);
 
   // 8. Forbruk with data
   await tab('forbruk');
@@ -361,6 +400,20 @@ try {
 
   // 11. Offline: service worker serves the app shell, data stays
   check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');
+  // 11a. Weak signal: the server answers nothing for 8 s. The app must open from cache in ~3 s, not 3 s per
+  // waterfall level (index.html → app.js → module imports) (Tess finding 1).
+  await navigate(BASE + 'index.html');
+  await waitFor(`document.querySelectorAll('#offer-list li').length > 0`);
+  stallMs = 8000;
+  const s0 = Date.now();
+  await send('Page.navigate', { url: BASE + 'index.html' }, S);
+  await sleep(300);
+  const shown = await waitFor(`document.readyState !== 'loading' && document.querySelectorAll('#offer-list li').length > 0`, 12000);
+  const stallTime = Date.now() - s0;
+  check(shown && stallTime < 3700, 'stalled network: offers visible in under ~3.5 s', `${stallTime} ms`);
+  stallMs = 0;
+  await sleep(500);
+
   serverUp = false;
   await send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, S);
   await navigate(BASE + 'index.html');

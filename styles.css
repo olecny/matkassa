@@ -111,7 +111,7 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 0; }
 /* Tilbud toolbar */
 .toolbar { display: flex; gap: 8px; }
 .search {
-  flex: 1; display: flex; align-items: center; gap: 8px; min-height: 44px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 44px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0 12px;
 }
 .search svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-3); stroke-width: 2; stroke-linecap: round; }
@@ -349,4 +349,10 @@ dialog label.check input { width: 22px; height: 22px; }
 .add-row select {
   flex: 1; min-width: 0; min-height: 48px; border-radius: 12px; border: 1px solid var(--border);
   background: var(--surface); padding: 0 10px; font-size: 16px;
+}
+/* Narrow phones (iPhone SE 1st gen, 320 px): keep search + sort on one line without sideways scroll. */
+.sort { flex: none; }
+@media (max-width: 360px) {
+  .sort select { max-width: 96px; }
+  .search { padding: 0 8px; gap: 6px; }
 }

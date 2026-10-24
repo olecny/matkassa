@@ -39,6 +39,7 @@ Ingen byggesteg, ingen avhengigheter: vanilla HTML/CSS/JS-moduler.
 | `js/app.js` | Visninger, handleliste, matching, forbruk, dialoger |
 | `js/tjek.js` | Tjek-adapter: `GET /v2/catalogs` (r_lat/r_lng/r_radius) → `GET /v2/offers?catalog_id=…`, normalisering (pris, førpris, enhetspris, gyldighet, bilde) |
 | `js/profile.js` | Læring: profil av egne kvitteringer, EAN-først matching med navn som reserve |
+| `js/settings.js` | Innstillinger: standardverdier og validering (backup kan ikke endre synk-repo/nøkkel) |
 | `js/extra-offers.js` | Tilbud med strekkode (REMA Superpris fra datarepoet) flettet inn i Tjek-tilbudene |
 | `js/categories.js` | Standardkategorier, norsk nøkkelordkart, regelmotor |
 | `js/spending.js` | Import (Trumf / spending.json / backup), sammenslåing, fordeling per kategori |
@@ -54,7 +55,9 @@ Ingen byggesteg, ingen avhengigheter: vanilla HTML/CSS/JS-moduler.
 - Tilbudsdata og persondata committes **aldri** (se `.gitignore`). Repoet inneholder bare appkode.
 
 ## Deploy
-GitHub Pages fra `main` (rot). `git push` → Pages bygger på ~1 min. Ved endring av app-skallet: bump `VERSION` i `sw.js`.
+GitHub Pages fra `main` (rot). `git push` → Pages bygger på ~1 min. Ved endring av app-skallet: bump `VERSION` i `sw.js`
+(og `APP_VERSION` i `js/app.js`). Service workeren henter app-skallet fra nett først, men faller tilbake til cache etter 3 s,
+og etter én treg forespørsel serveres resten av lastingen fra cache (svakt nett i butikken).
 
 ## Status
 Fase 1–2 og 6 (strekkode, per bruker, testagent) er bygget og testet headless (enhet, e2e falsk + live, personvern).
