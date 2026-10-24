@@ -105,7 +105,7 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 0; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn-ghost { background: transparent; }
 .btn-danger { color: var(--danger); }
-.btn.small { min-height: 36px; padding: 0 12px; font-size: .9rem; }
+.btn.small { min-height: 44px; padding: 0 12px; font-size: .9rem; }
 .wide { width: 100%; margin-top: 12px; }
 
 /* Tilbud toolbar */
@@ -342,3 +342,11 @@ dialog label.check input { width: 22px; height: 22px; }
 .toggle { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: .9rem; cursor: pointer; }
 .toggle input { width: 22px; height: 22px; accent-color: var(--accent); }
 .toggle .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--text-3)); flex: none; }
+.via {
+  display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); vertical-align: 1px; margin-left: 4px;
+}
+.add-row select {
+  flex: 1; min-width: 0; min-height: 48px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface); padding: 0 10px; font-size: 16px;
+}

@@ -21,7 +21,22 @@ export const GROCERY_DEALERS = {
   pR2h9x: 'Holdbart',
 };
 
-export const TRONDHEIM = { lat: 63.4305, lng: 10.3951, radius: 30000 };
+// Areas the user can pick in Mer → Område (or "Bruk min posisjon"). Trondheim is the default because the app
+// started there; it is a region, not personal data, and every user can change it.
+export const AREAS = [
+  { name: 'Oslo', lat: 59.9139, lng: 10.7522, radius: 30000 },
+  { name: 'Bergen', lat: 60.3913, lng: 5.3221, radius: 30000 },
+  { name: 'Trondheim', lat: 63.4305, lng: 10.3951, radius: 30000 },
+  { name: 'Stavanger', lat: 58.97, lng: 5.7331, radius: 30000 },
+  { name: 'Kristiansand', lat: 58.1467, lng: 7.9956, radius: 30000 },
+  { name: 'Tromsø', lat: 69.6492, lng: 18.9553, radius: 30000 },
+  { name: 'Bodø', lat: 67.2804, lng: 14.4049, radius: 30000 },
+  { name: 'Ålesund', lat: 62.4722, lng: 6.1495, radius: 30000 },
+  { name: 'Drammen', lat: 59.7439, lng: 10.2045, radius: 30000 },
+  { name: 'Fredrikstad', lat: 59.2181, lng: 10.9298, radius: 30000 },
+];
+export const TRONDHEIM = AREAS[2];
+export const DEFAULT_AREA = TRONDHEIM;
 
 // Safari does not parse "+0000" offsets; make them "+00:00".
 export function parseDate(s) {

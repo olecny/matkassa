@@ -1,10 +1,11 @@
 import * as db from './db.js';
-import { fetchOffers, TRONDHEIM } from './tjek.js';
+import { fetchOffers, AREAS, DEFAULT_AREA } from './tjek.js';
 import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categories.js';
-import { buildProfile, scoreOffer } from './profile.js';
+import { buildProfile, scoreOffer, normEan } from './profile.js';
+import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 
@@ -27,7 +28,9 @@ const state = {
   categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
   rules: [],
   receipts: [],
-  settings: { chains: [], hiddenChains: [], sync: { repo: 'olecny/matkassa-data', path: 'spending.json', token: '', lastSync: null, lastError: null } },
+  // No personal defaults: every user points the app at their own private data repo (or none) in Mer.
+  settings: { chains: [], hiddenChains: [], area: null, sync: { repo: '', path: 'spending.json', token: '', lastSync: null, lastTry: null, lastError: null } },
+  extraOffers: null, // {fetchedAt, source, offers} from the user's data repo (REMA Superpris with barcodes)
   q: '',
   sort: 'fordeg',
   cat: null,
@@ -55,8 +58,15 @@ function rebuildClassifier() {
   rebuildOfferIndex();
 }
 
+let mergeStats = { attached: 0, added: 0 };
 function rebuildOfferIndex() {
-  const offers = state.offersData ? state.offersData.offers : [];
+  let offers = state.offersData ? state.offersData.offers : [];
+  mergeStats = { attached: 0, added: 0 };
+  if (offers.length && state.extraOffers && state.extraOffers.offers.length) {
+    const m = mergeExtraOffers(offers, state.extraOffers.offers);
+    offers = m.offers;
+    mergeStats = { attached: m.attached, added: m.added };
+  }
   offerIndex = offers.map((o) => ({
     o,
     words: tokens(o.title),
@@ -64,9 +74,16 @@ function rebuildOfferIndex() {
     cat: classify(o.title) || classify(o.title + ' ' + o.desc) || 'annet',
   }));
 }
+const area = () => state.settings.area || DEFAULT_AREA;
+const offerById = (id) => (offerIndex.find((x) => x.o.id === id) || {}).o;
 
 const catById = (id) => state.categories.find((c) => c.id === id);
 const hiddenChains = () => new Set(state.settings.hiddenChains || []);
+/** Chain chips the user picked, minus hidden chains. Empty = all. */
+const selectedChains = () => {
+  const hidden = hiddenChains();
+  return new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
+};
 const activeOffers = () => {
   const now = Date.now();
   const hidden = hiddenChains();
@@ -76,20 +93,22 @@ const activeOffers = () => {
 /* ---------- personal fit: learn from receipts ---------- */
 const FIT_MIN = 0.2; // below this an offer isn't "for you"
 let profile = null;
-let profileFor = null; // receipts array the profile was built from
+let profileFor = null; // [receipts, classifier] the profile was built from
 let fitFor = null; // offerIndex the fit was computed for
 
+/** The profile is built only from the receipts stored on this device, i.e. this user's own purchases. */
 function ensureFit() {
-  if (profileFor !== state.receipts || profile === null) {
-    profile = buildProfile(state.receipts);
-    profileFor = state.receipts;
+  if (!profileFor || profileFor[0] !== state.receipts || profileFor[1] !== classify) {
+    profile = buildProfile(state.receipts, { classify });
+    profileFor = [state.receipts, classify];
     fitFor = null;
   }
   if (fitFor === offerIndex) return;
   for (const x of offerIndex) {
-    const { score, because } = scoreOffer(profile, x.words);
+    const { score, because, via } = scoreOffer(profile, x.words, { eans: x.o.eans, cat: x.cat });
     x.fit = score;
     x.because = because;
+    x.via = via;
   }
   fitFor = offerIndex;
 }
@@ -102,8 +121,9 @@ function featuredOffers(n = 10) {
   const seen = new Set();
   const out = [];
   const now = Date.now();
+  const chains = selectedChains();
   const ranked = activeOffers()
-    .filter((x) => x.fit >= FIT_MIN && (!x.o.from || x.o.from <= now))
+    .filter((x) => x.fit >= FIT_MIN && (!x.o.from || x.o.from <= now) && (!chains.size || chains.has(x.o.chainId)))
     .sort((a, b) => b.fit * (1 + discount(b.o)) - a.fit * (1 + discount(a.o)));
   for (const x of ranked) {
     if (seen.has(x.because.name)) continue;
@@ -163,7 +183,7 @@ function renderStatus() {
 async function loadOffers(force = false) {
   if (state.loading) return;
   const d = state.offersData;
-  if (!force && d && Date.now() - d.fetchedAt < STALE_MS) return;
+  if (!force && d && Date.now() - d.fetchedAt < STALE_MS && d.area === area().name) return;
   if (!navigator.onLine) {
     state.error = 'Frakoblet';
     render();
@@ -173,11 +193,12 @@ async function loadOffers(force = false) {
   state.error = null;
   renderStatus();
   try {
-    const data = await fetchOffers(TRONDHEIM, (done, total) => {
+    const data = await fetchOffers(area(), (done, total) => {
       state.loading = `Henter tilbud … ${done}/${total} kundeaviser`;
       renderStatus();
     });
     if (!data.offers.length) throw new Error('Tjek ga ingen tilbud');
+    data.area = area().name;
     state.offersData = data;
     await db.set('offers', data);
     rebuildOfferIndex();
@@ -192,8 +213,7 @@ async function loadOffers(force = false) {
 
 function filteredOffers() {
   ensureFit();
-  const hidden = hiddenChains();
-  const chains = new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
+  const chains = selectedChains();
   const qTokens = tokens(state.q);
   let list = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!state.cat || x.cat === state.cat));
   if (qTokens.length) {
@@ -253,7 +273,14 @@ function inList(offerId) {
   return state.list.some((i) => i.offer && i.offer.id === offerId && !i.done);
 }
 
-function offerCard({ o, fit, because }) {
+/** Why an offer is "for you". via 'ean' = the same barcode is on your receipts, 'name' = similar name. */
+function whyText(because, via) {
+  return via === 'ean'
+    ? `Du kjøper denne (${because.n}×) <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>`
+    : `Du kjøper ofte ${esc(because.name)} (${because.n}×)`;
+}
+
+function offerCard({ o, fit, because, via }) {
   const added = inList(o.id);
   const img = o.img
     ? `<img class="thumb" src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb none',textContent:'Bilde'}))">`
@@ -264,7 +291,7 @@ function offerCard({ o, fit, because }) {
       <div class="title">${esc(titleCase(o.title))}</div>
       ${o.desc ? `<div class="desc">${esc(o.desc)}</div>` : ''}
       <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span><span>${validText(o)}</span></div>
-      ${fit >= FIT_MIN && because ? `<div class="why">Du kjøper ofte ${esc(because.name)} (${because.n}×)</div>` : ''}
+      ${fit >= FIT_MIN && because ? `<div class="why">${whyText(because, via)}</div>` : ''}
     </div>
     <div class="priceblock">
       <span class="price">${kr(o.price)}</span>
@@ -275,14 +302,14 @@ function offerCard({ o, fit, because }) {
   </li>`;
 }
 
-function featCard({ o, because }) {
+function featCard({ o, because, via }) {
   const added = inList(o.id);
   return `<li class="feat">
     ${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
     <div class="ft">${esc(titleCase(o.title))}</div>
     <div class="fp">${kr(o.price)}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
     <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></div>
-    <div class="why">${esc(because.name)} · ${because.n}×</div>
+    <div class="why">${esc(because.name)} · ${because.n}×${via === 'ean' ? ' <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>' : ''}</div>
     <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}">${added ? '✓' : '+'}</button>
   </li>`;
 }
@@ -290,7 +317,7 @@ function featCard({ o, because }) {
 function renderChips() {
   const d = state.offersData;
   const hidden = hiddenChains();
-  const sel = new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
+  const sel = selectedChains();
   const chains = d ? d.chains.filter((c) => !hidden.has(c.id)) : [];
   $('#chain-chips').innerHTML =
     `<button class="chip" type="button" data-chain="" aria-pressed="${sel.size === 0}">Alle kjeder</button>` +
@@ -340,20 +367,29 @@ function renderOffers() {
 /* ---------- shopping list ---------- */
 const STOP = new Set(['og', 'i', 'på', 'med', 'til', 'stk', 'pk', 'kg', 'g', 'l', 'liter', 'x']);
 
-function dealsFor(text) {
-  const q = tokens(text).filter((t) => t.length >= 2 && !STOP.has(t) && !/^\d+$/.test(t));
-  if (!q.length) return [];
+/**
+ * Offers for a shopping-list item. Barcode first: an item added from an offer remembers that offer's EANs, so the
+ * same product is found again in later weeks (marked o.via = 'ean'). Name-based matching is the fallback.
+ */
+function dealsFor(text, eans) {
   const now = Date.now();
-  const hidden = hiddenChains();
-  const chains = new Set((state.settings.chains || []).filter((id) => !hidden.has(id)));
+  const chains = selectedChains();
+  const live = activeOffers().filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!x.o.from || x.o.from <= now + 7 * 864e5));
+  const want = new Set((eans || []).map(normEan).filter(Boolean));
+  const byEan = want.size ? live.filter((x) => (x.o.eans || []).some((e) => want.has(e))) : [];
+  const eanIds = new Set(byEan.map((x) => x.o.id));
+  const cheap = (a, b) => (a.o.unitPrice ?? a.o.price * 10) - (b.o.unitPrice ?? b.o.price * 10);
+  const first = byEan.sort(cheap).map((x) => ({ ...x.o, via: 'ean' }));
+  const q = tokens(text).filter((t) => t.length >= 2 && !STOP.has(t) && !/^\d+$/.test(t));
+  if (!q.length) return first;
   const itemCat = classify(text); // "melk" → Meieri, so milk beats "potetmos med melk"
-  return activeOffers()
-    .filter((x) => (!chains.size || chains.has(x.o.chainId)) && (!x.o.from || x.o.from <= now + 7 * 864e5))
+  return first.concat(live
+    .filter((x) => !eanIds.has(x.o.id))
     .map((x) => ({ x, s: titleScore(q, x) }))
     .filter((r) => r.s > 0)
     .map((r) => (itemCat && r.x.cat === itemCat ? { x: r.x, s: r.s + 2 } : r))
-    .sort((a, b) => b.s - a.s || (a.x.o.unitPrice ?? a.x.o.price * 10) - (b.x.o.unitPrice ?? b.x.o.price * 10))
-    .map((r) => r.x.o);
+    .sort((a, b) => b.s - a.s || cheap(a.x, b.x))
+    .map((r) => r.x.o));
 }
 function titleScore(q, x) {
   let score = 0;
@@ -373,7 +409,8 @@ function titleScore(q, x) {
 function addItem(text, offer) {
   text = text.trim();
   if (!text) return;
-  state.list.unshift({ id: uid(), text, done: false, added: Date.now(), offer: offer || null });
+  const eans = offer && offer.eans && offer.eans.length ? offer.eans : undefined;
+  state.list.unshift({ id: uid(), text, done: false, added: Date.now(), offer: offer || null, eans });
   save.list();
 }
 
@@ -389,14 +426,18 @@ function dealHTML(item) {
   if (item.offer) {
     const o = item.offer;
     const expired = o.till && o.till < now;
+    if (expired && item.eans) {
+      const again = dealsFor(item.text, item.eans).filter((d) => d.via === 'ean');
+      if (again.length) return `<div class="deal"><span class="deal-tag">På tilbud igjen hos ${esc(again[0].chain)} – ${kr(again[0].price)}</span><span class="via" title="Samme strekkode">strekkode</span></div>`;
+    }
     return `<div class="deal"><span class="deal-tag from">${expired ? 'Tilbudet er utløpt' : `Tilbud hos ${esc(o.chain)} – ${kr(o.price)}`}</span>${!expired && o.till ? `<span class="deal-more">til ${esc(dayFmt.format(o.till))}</span>` : ''}</div>`;
   }
-  const deals = dealsFor(item.text);
+  const deals = dealsFor(item.text, item.eans);
   if (!deals.length) return state.offersData ? '<div class="nodeal">Ikke på tilbud denne uken</div>' : '';
   const best = deals[0];
   const rest = deals.slice(0, 6);
   return `<details class="deal"><summary><span class="deal-tag">På tilbud hos ${esc(best.chain)} – ${kr(best.price)}</span>
-    <span class="deal-what">${esc(titleCase(best.title))}${best.unitPrice ? ` · ${unitText(best)}` : ''}${deals.length > 1 ? ` · <u>+${deals.length - 1} til</u>` : ''}</span></summary>
+    <span class="deal-what">${best.via === 'ean' ? '<span class="via" title="Samme strekkode">strekkode</span> ' : ''}${esc(titleCase(best.title))}${best.unitPrice ? ` · ${unitText(best)}` : ''}${deals.length > 1 ? ` · <u>+${deals.length - 1} til</u>` : ''}</span></summary>
     <ul>${rest.map((o) => `<li><span>${esc(o.chain)}: ${esc(titleCase(o.title))}${o.unitPrice ? ` · ${unitText(o)}` : ''}</span><b>${kr(o.price)}</b></li>`).join('')}</ul></details>`;
 }
 
@@ -412,7 +453,7 @@ function renderList() {
     )
     .join('');
   const open = state.list.filter((i) => !i.done);
-  const onSale = open.filter((i) => i.offer || dealsFor(i.text).length).length;
+  const onSale = open.filter((i) => i.offer || dealsFor(i.text, i.eans).length).length;
   const done = state.list.length - open.length;
   $('#list-summary').textContent = state.list.length
     ? `${open.length} igjen${state.offersData ? ` · ${onSale} på tilbud` : ''}${done ? ` · ${done} avkrysset` : ''}`
@@ -663,27 +704,49 @@ async function importFile(file) {
   render();
 }
 
-/* ---------- sync from a private GitHub repo (written by ingest/ on the Mac) ---------- */
+/* ---------- sync from the user's own private GitHub repo (written by ingest/ on their Mac) ---------- */
 const SYNC_EVERY_MS = 60 * 60 * 1000;
+const RETRY_MS = 10 * 60 * 1000;
+const REPO_RE = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/;
+const PATH_RE = /^[A-Za-z0-9._\/-]{1,200}$/;
 let syncing = false;
+
+async function ghFile(s, path) {
+  const res = await fetch(`https://api.github.com/repos/${s.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+    headers: { Authorization: `Bearer ${s.token}`, Accept: 'application/vnd.github.raw+json', 'X-GitHub-Api-Version': '2022-11-28' },
+    cache: 'no-store',
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('Nøkkelen ble avvist (utløpt eller mangler lesetilgang)');
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GitHub svarte ${res.status}`);
+  return res.json();
+}
 
 async function syncSpending({ quiet = false } = {}) {
   const s = state.settings.sync;
   if (!s || !s.token || !s.repo || syncing || !navigator.onLine) return;
   syncing = true;
+  s.lastTry = Date.now();
   try {
-    const path = s.path.split('/').map(encodeURIComponent).join('/');
-    const res = await fetch(`https://api.github.com/repos/${s.repo}/contents/${path}`, {
-      headers: { Authorization: `Bearer ${s.token}`, Accept: 'application/vnd.github.raw+json' },
-      cache: 'no-store',
-    });
-    if (res.status === 401 || res.status === 403) throw new Error('Nøkkelen ble avvist (utløpt eller mangler lesetilgang)');
-    if (res.status === 404) throw new Error(`Fant ikke ${s.path} i ${s.repo}`);
-    if (!res.ok) throw new Error(`GitHub svarte ${res.status}`);
-    const { kind, data } = detectImport(await res.json());
+    if (!REPO_RE.test(s.repo) || !PATH_RE.test(s.path) || s.path.includes('..')) throw new Error('Ugyldig repo eller filsti');
+    const json = await ghFile(s, s.path);
+    if (json === null) throw new Error(`Fant ikke ${s.path} i ${s.repo} (eller nøkkelen har ikke tilgang til repoet)`);
+    const { kind, data } = detectImport(json);
     if (kind === 'backup') throw new Error('Synkfila er en backup, ikke kvitteringer');
     const { receipts, added } = mergeReceipts(state.receipts, data);
     state.receipts = receipts;
+    // Optional: offers with barcodes next to spending.json (ingest/rema.py --offers). Missing file = fine.
+    const dir = s.path.includes('/') ? s.path.slice(0, s.path.lastIndexOf('/') + 1) : '';
+    try {
+      const extra = await ghFile(s, dir + 'rema-offers.json');
+      if (extra) {
+        state.extraOffers = { fetchedAt: Date.now(), source: extra.source, offers: parseExtraOffers(extra) };
+        await db.set('extraOffers', state.extraOffers);
+        rebuildOfferIndex();
+      }
+    } catch (e) {
+      console.warn('rema-offers.json', e);
+    }
     s.lastSync = Date.now();
     s.lastError = null;
     await Promise.all([save.receipts(), save.settings()]);
@@ -699,9 +762,13 @@ async function syncSpending({ quiet = false } = {}) {
   }
 }
 
+/** Auto-sync at most hourly, and after a failure wait 10 min instead of retrying on every app switch. */
 const syncDue = () => {
   const s = state.settings.sync;
-  return s && s.token && (!s.lastSync || Date.now() - s.lastSync > SYNC_EVERY_MS);
+  if (!s || !s.token || !s.repo) return false;
+  const now = Date.now();
+  if (s.lastTry && now - s.lastTry < RETRY_MS) return false;
+  return !s.lastSync || now - s.lastSync > SYNC_EVERY_MS;
 };
 
 function exportBackup() {
@@ -737,9 +804,9 @@ function renderMore() {
   const d = state.offersData;
   $('#more-body').innerHTML = `
     <div class="card"><h2>Synk fra Mac</h2>
-      <p class="hint" style="margin-top:0">Kvitteringene hentes fra et privat GitHub-repo som Mac-en oppdaterer. Nøkkelen lagres bare på denne enheten og tas aldri med i backup.</p>
+      <p class="hint" style="margin-top:0">Valgfritt. Kvitteringene dine hentes fra ditt eget <strong>private</strong> GitHub-repo, som Mac-skriptet (<code>ingest/sync.sh</code>) oppdaterer. Nøkkelen lagres bare på denne enheten og tas aldri med i backup.</p>
       <form id="sync-form">
-        <label class="field"><span>Repo</span><input id="sync-repo" value="${esc(state.settings.sync.repo)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>Ditt private repo</span><input id="sync-repo" value="${esc(state.settings.sync.repo)}" placeholder="brukernavn/matkassa-data" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
         <label class="field"><span>GitHub-nøkkel (kun lesetilgang)</span><input id="sync-token" type="password" placeholder="${state.settings.sync.token ? 'Lagret – lim inn for å bytte' : 'github_pat_…'}" autocomplete="off"></label>
         <div class="actions" style="margin-top:8px">
           <button class="btn" type="submit">${state.settings.sync.token ? 'Synk nå' : 'Lagre og synk'}</button>
@@ -750,6 +817,12 @@ function renderMore() {
         <dt>Sist synket</dt><dd>${state.settings.sync.lastSync ? timeFmt.format(state.settings.sync.lastSync) : 'aldri'}</dd>
         ${state.settings.sync.lastError ? `<dt>Feil</dt><dd>${esc(state.settings.sync.lastError)}</dd>` : ''}
       </dl>
+    </div>
+    <div class="card"><h2>Område</h2>
+      <p class="hint" style="margin-top:0">Tilbudene hentes for kundeavisene rundt dette stedet.</p>
+      <div class="add-row"><label class="sr-only" for="area-select">Område</label>
+        <select id="area-select">${AREAS.map((a) => `<option value="${esc(a.name)}" ${a.name === area().name ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}${AREAS.some((a) => a.name === area().name) ? '' : `<option selected>${esc(area().name)}</option>`}</select>
+        <button class="btn" type="button" data-action="area-here">Bruk min posisjon</button></div>
     </div>
     <div class="card"><h2>Kjeder</h2>
       <p class="hint" style="margin-top:0">Skjulte kjeder vises ikke i tilbud, filtre eller handlelisten.</p>
@@ -774,14 +847,32 @@ function renderMore() {
         <dt>Kvitteringer</dt><dd>${state.receipts.length}</dd>
         <dt>Varer i listen</dt><dd>${state.list.length}</dd>
         <dt>Tilbud lagret</dt><dd>${d ? `${d.offers.length} (${timeFmt.format(d.fetchedAt)})` : 'ingen'}</dd>
+        <dt>Med strekkode</dt><dd>${(() => { const c = eanCoverage(offerIndex.map((x) => x.o)); return c.n ? `${c.withEan} av ${c.n} (${c.pct.toLocaleString('nb-NO', { maximumFractionDigits: 1 })} %)` : '–'; })()}${state.extraOffers ? ` · REMA Superpris: ${state.extraOffers.offers.length}` : ''}</dd>
         <dt>Varig lagring</dt><dd>${state.persisted ? 'Ja' : 'Ikke bekreftet – ta backup jevnlig'}</dd>
       </dl>
       <div class="actions" style="margin-top:12px"><button class="btn btn-danger btn-ghost" type="button" data-action="wipe-spending">Slett alle kvitteringer</button></div>
     </div>
     <div class="card"><h2>Om Matkassa</h2>
-      <p class="hint" style="margin-top:0">Versjon ${APP_VERSION}. Tilbud hentes fra Tjek (motoren bak eTilbudsavis), et uoffisielt API, for området rundt Trondheim. Kategorier for tilbud gjettes fra varenavnet. Alt du legger inn lagres bare på denne enheten.</p>
+      <p class="hint" style="margin-top:0">Versjon ${APP_VERSION}. Tilbud hentes fra Tjek (motoren bak eTilbudsavis), et uoffisielt API, for området rundt ${esc(area().name)}. Kategorier for tilbud gjettes fra varenavnet. «Tilbud for deg» lærer bare av kvitteringene på denne enheten. Tjek-tilbud har ikke strekkoder, så de matches på navn; strekkodetreff (EAN) vises der begge sider har strekkode. Alt du legger inn lagres bare på denne enheten.</p>
       <p class="hint">Installer: åpne i Safari → Del → <strong>Legg til på Hjem-skjerm</strong>.</p>
     </div>`;
+}
+
+function setArea(a) {
+  state.settings.area = a;
+  save.settings();
+  toast(`Område: ${a.name}. Henter tilbud …`);
+  loadOffers(true);
+}
+
+function useMyLocation() {
+  if (!navigator.geolocation) { toast('Posisjon er ikke tilgjengelig'); return; }
+  navigator.geolocation.getCurrentPosition(
+    // Rounded to ~1 km: Tjek only needs the neighbourhood, not the user's exact position.
+    (p) => setArea({ name: 'Min posisjon', lat: +p.coords.latitude.toFixed(2), lng: +p.coords.longitude.toFixed(2), radius: 30000 }),
+    () => toast('Fikk ikke tilgang til posisjon'),
+    { maximumAge: 36e5, timeout: 15000 },
+  );
 }
 
 /* ---------- events ---------- */
@@ -822,14 +913,14 @@ function bind() {
     if (cat) { state.cat = cat.dataset.cat || null; state.shown = PAGE; renderOffers(); return; }
     const add = e.target.closest('[data-add]');
     if (add) {
-      const o = state.offersData.offers.find((x) => x.id === add.dataset.add);
+      const o = offerById(add.dataset.add);
       if (!o) return;
       if (inList(o.id)) {
         state.list = state.list.filter((i) => !(i.offer && i.offer.id === o.id && !i.done));
         save.list();
         toast('Fjernet fra handlelisten');
       } else {
-        addItem(titleCase(o.title), { id: o.id, chain: o.chain, chainId: o.chainId, price: o.price, till: o.till, title: o.title });
+        addItem(titleCase(o.title), { id: o.id, chain: o.chain, chainId: o.chainId, price: o.price, till: o.till, title: o.title, eans: o.eans });
         toast(`Lagt til: ${titleCase(o.title)}`);
       }
       renderOffers();
@@ -875,6 +966,7 @@ function bind() {
     if (act === 'import') $('#file-input').click();
     if (act === 'manual') openReceiptDialog();
     if (act === 'export') exportBackup();
+    if (act === 'area-here') useMyLocation();
     if (act === 'sync-forget') {
       Object.assign(state.settings.sync, { token: '', lastError: null });
       save.settings();
@@ -938,6 +1030,11 @@ function bind() {
 
   $('#view-mer').addEventListener('change', (e) => {
     const t = e.target;
+    if (t.id === 'area-select') {
+      const a = AREAS.find((x) => x.name === t.value);
+      if (a) setArea(a);
+      return;
+    }
     if (t.dataset.chainshow) {
       const hidden = hiddenChains();
       if (t.checked) hidden.delete(t.dataset.chainshow);
@@ -978,11 +1075,14 @@ function bind() {
     if (e.target.id === 'sync-form') {
       e.preventDefault();
       const s = state.settings.sync;
-      s.repo = $('#sync-repo').value.trim() || s.repo;
+      const repo = $('#sync-repo').value.trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$|\/$/g, '');
+      if (repo && !REPO_RE.test(repo)) { toast('Repo må skrives som brukernavn/repo'); return; }
+      if (repo !== s.repo) Object.assign(s, { repo, lastSync: null, lastTry: null, lastError: null });
       const token = $('#sync-token').value.trim();
       if (token) s.token = token;
       await save.settings();
-      if (!s.token) { toast('Lim inn en GitHub-nøkkel først'); return; }
+      if (!s.repo) { toast('Synk er slått av'); renderMore(); return; }
+      if (!s.token) { toast('Lim inn en GitHub-nøkkel først'); renderMore(); return; }
       syncSpending();
       return;
     }
@@ -1008,10 +1108,11 @@ function bind() {
 async function start() {
   bind();
   try {
-    const [offers, list, categories, rules, receipts, settings] = await Promise.all(
-      ['offers', 'list', 'categories', 'rules', 'receipts', 'settings'].map((k) => db.get(k)),
+    const [offers, list, categories, rules, receipts, settings, extraOffers] = await Promise.all(
+      ['offers', 'list', 'categories', 'rules', 'receipts', 'settings', 'extraOffers'].map((k) => db.get(k)),
     );
     if (offers) state.offersData = offers;
+    if (extraOffers && Array.isArray(extraOffers.offers)) state.extraOffers = extraOffers;
     if (list) state.list = list;
     if (categories && categories.length) state.categories = categories;
     if (rules) state.rules = rules;

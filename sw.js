@@ -1,6 +1,6 @@
 // Matkassa service worker: precache the app shell, cache offer images.
 // Offer data itself is stored by the app in IndexedDB, so offers work offline too.
-const VERSION = 'matkassa-v4';
+const VERSION = 'matkassa-v5';
 const SHELL = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   'js/categories.js',
   'js/spending.js',
   'js/profile.js',
+  'js/extra-offers.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
@@ -19,6 +20,7 @@ const SHELL = [
 ];
 const IMG_CACHE = 'matkassa-img';
 const IMG_MAX = 400;
+const NET_TIMEOUT_MS = 3000;
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -43,18 +45,24 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // App shell: network first so updates show up at once; cache when offline.
+  // App shell: network first so updates show up at once; cache when offline or when the network is too slow
+  // (weak signal in the shop), so the app never hangs on a white screen.
   if (url.origin === self.location.origin) {
+    let stored = Promise.resolve();
+    const net = fetch(req, { cache: 'no-cache' }).then((res) => {
+      if (res.ok) {
+        const copy = res.clone(); // clone before the page starts reading the body
+        stored = caches.open(VERSION).then((c) => c.put(req, copy));
+      }
+      return res;
+    });
+    e.waitUntil(net.then(() => stored).catch(() => null)); // keep the worker alive until the cache is refreshed
     e.respondWith(
       caches.open(VERSION).then(async (c) => {
-        try {
-          const res = await fetch(req, { cache: 'no-cache' });
-          if (res.ok) c.put(req, res.clone());
-          return res;
-        } catch {
-          const cached = await c.match(req, { ignoreSearch: true });
-          return cached || (req.mode === 'navigate' ? c.match('index.html') : Response.error());
-        }
+        const cached = (await c.match(req, { ignoreSearch: true })) || (req.mode === 'navigate' ? await c.match('index.html') : undefined);
+        if (!cached) return net.catch(() => Response.error());
+        const slow = new Promise((resolve) => setTimeout(() => resolve(cached), NET_TIMEOUT_MS));
+        return Promise.race([net.catch(() => cached), slow]);
       }),
     );
     return;
