@@ -1,5 +1,7 @@
 # Plan: Mattilbud-app (tilbud, handleliste og matforbruk)
-*Opprettet 2026-10-24 · Status: Fase 0 av 5 (venter på Oles beslutninger) · Eier: Jarvis · Teknisk vurdering: Dave*
+*Opprettet 2026-10-24 · Status: Fase 1 bygget og deployet, fase 2 (app-delen) bygget · venter på Oles test på iPhone og ekte kvitteringsdata · Eier: Jarvis · Teknisk vurdering: Dave*
+
+**Live:** https://olecny.github.io/matkassa/ · Repo: github.com/olecny/matkassa (bare appkode)
 
 ## Mål
 En norsk app på mobilen som (1) viser ukens mattilbud fra kjedene Ole handler i, (2) har en handleliste som sier fra når en vare er på tilbud, og (3) sporer matforbruket totalt og per kategori. Kategoriene kan tilpasses for hver bruker, først Ole.
@@ -75,35 +77,35 @@ Ingen nye agenter trengs.
 
 ### Fase 0: Oppsett og beslutninger
 - [ ] Ole svarer på beslutning 1–7
-- [ ] Opprett repo `mattilbud-app/` (git init) med README
+- [x] Opprett repo `mattilbud-app/` (git init) med README
 - [ ] Friday lager utkast til innsynsforespørsler hvis beslutning 4 = ja
 **Gate 0:**
 - [ ] Alle 7 beslutninger er notert i denne planen
 - [ ] (Ole) Innsynsutkast godkjent og sendt, eller valgt bort
 
 ### Fase 1: MVP – Tilbud + handleliste (~2–3 økter) · **Hvem:** Dave
-- [ ] Tjek-adapter: hent ukens tilbud for Oles kjeder og normaliser pris og enhetspris
-- [ ] Tilbudsvisning: søk, filtrer på kjede og kategori (nøkkelordkart), gyldig til-dato
-- [ ] Handleliste: legg til, kryss av og slett. Lagres i IndexedDB
-- [ ] Matching: «Melk – på tilbud hos Kiwi, 19,90» på listevarer
-- [ ] PWA: manifest, service worker, offline-cache av siste tilbud
-- [ ] Deploy til GitHub Pages (bare appkode)
+- [x] Tjek-adapter: hent ukens tilbud for Oles kjeder og normaliser pris og enhetspris *(alle 14 dagligvarekjeder rundt Trondheim, filter i appen)*
+- [x] Tilbudsvisning: søk, filtrer på kjede og kategori (nøkkelordkart), gyldig til-dato
+- [x] Handleliste: legg til, kryss av og slett. Lagres i IndexedDB
+- [x] Matching: «Melk – på tilbud hos Kiwi, 19,90» på listevarer
+- [x] PWA: manifest, service worker, offline-cache av siste tilbud
+- [x] Deploy til GitHub Pages (bare appkode)
 **Gate 1:**
-- [ ] Skjermbilde i 390×844 viser ekte tilbud fra denne uken
-- [ ] Handlelisten virker i flymodus
-- [ ] Ingen tilbudsdata er committet i det offentlige repoet (`git ls-files` sjekket)
+- [x] Skjermbilde i 390×844 viser ekte tilbud fra denne uken
+- [x] Handlelisten virker i flymodus *(testet headless med offline-modus; ikke på ekte iPhone ennå)*
+- [x] Ingen tilbudsdata er committet i det offentlige repoet (`git ls-files` sjekket)
 - [ ] (Ole) Installert på telefonen og testet i butikken
 
 ### Fase 2: Forbruk v1 (~2–3 økter) · **Hvem:** Dave
-- [ ] `ingest.py` på Mac med REMA- og/eller Trumf-adapter (tokens i `.env`)
-- [ ] Import av Trumf-innsyns-JSON (historikk)
-- [ ] Felles kvitteringsformat (`spending.json`): dato, kjede, varelinjer, beløp, kategori
-- [ ] Kategorimotor med Oles regler og kø for «Ukategorisert»
-- [ ] Forbruksvisning: per måned, per kategori og trend. JSON-import og -eksport
+- [ ] `ingest.py` på Mac med REMA- og/eller Trumf-adapter (tokens i `.env`) *(skjelett `ingest/rema.py` laget, utestet uten token; Trumf importeres direkte i appen)*
+- [x] Import av Trumf-innsyns-JSON (historikk) *(testet med testfil, ikke ekte innsyn ennå)*
+- [x] Felles kvitteringsformat (`spending.json`): dato, kjede, varelinjer, beløp, kategori *(se `ingest/README.md`)*
+- [x] Kategorimotor med Oles regler og kø for «Ukategorisert»
+- [x] Forbruksvisning: per måned, per kategori og trend. JSON-import og -eksport
 **Gate 2:**
 - [ ] Minst én måned med ekte kvitteringer er importert og ≥ 90 % av beløpet er kategorisert
 - [ ] Summen per måned stemmer med kvitteringene (testskript)
-- [ ] Ingen tokens i git (`git grep` sjekket)
+- [x] Ingen tokens i git (`git grep` sjekket)
 
 ### Fase 3: Kvitteringer fra foto/PDF (~2 økter) · **Hvem:** Dave + Jarvis
 - [ ] Mappe `inbox/` der Ole slipper bilder og PDF-er (f.eks. via iCloud)
@@ -120,8 +122,8 @@ Ingen nye agenter trengs.
 - [ ] Penny har ført én måned uten avvik mot appen
 
 ### Fase 5: Verifiser og overlever
-- [ ] README med hvordan du installerer, importerer og legger til kategorier
-- [ ] Rad i Projects-tabellen i `CLAUDE.md`
+- [x] README med hvordan du installerer, importerer og legger til kategorier
+- [x] Rad i Projects-tabellen i `CLAUDE.md`
 - [ ] Oppføring i `project-jarvis/project-log.md`
 **Gate 5:**
 - [ ] (Ole) Har brukt appen i én hel handleuke
@@ -142,3 +144,4 @@ Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og 
 | Tid | Fase | Hva skjedde |
 |---|---|---|
 | 2026-10-24 | 0 | Plan laget. Jarvis researchet kilder, og Dave verifiserte API-er og anbefalte arkitektur |
+| 2026-10-24 | 1–2 | Dave bygget Matkassa (PWA): Tjek-tilbud fra 14 kjeder, handleliste med tilbudsmatching, offline, forbruk med Trumf/spending.json-import, regelmotor, backup; REMA-skjelett på Mac. Deployet til olecny.github.io/matkassa. Testet headless (390×844, lys/mørk, offline). Antatte standardvalg for beslutning 1 og 5; ingen e-post sendt, ingen innlogging |
