@@ -6,7 +6,8 @@ Skript som kjører på Mac-en (Jarvis-maskinen) og lager `spending.json`, som du
 
 | Skript | Status |
 |---|---|
-| `rema.py` | Skjelett. **Ikke testet mot en ekte konto** (ingen token tilgjengelig ennå). Endepunkter fra [rema1000-cli](https://github.com/Alfredvc/rema1000-cli) `API.md` (fanget 2026-04-06) |
+| `rema.py` | Testet mot en ekte konto (101 kvitteringer, varelinjesum = total). `--offers` henter REMAs Superpris-tilbud med strekkoder (GTIN). Endepunkter fra [rema1000-cli](https://github.com/Alfredvc/rema1000-cli) `API.md` |
+| `sync.sh` | Kjører `rema.py` og pusher til **ditt eget private** datarepo, som appen synker fra |
 | Trumf | Trengs ikke på Mac: Trumf-innsyn (JSON) importeres direkte i appen |
 | Kvitteringsfoto/PDF | Fase 3: Claude Code tolker bilder til samme format |
 
@@ -15,17 +16,22 @@ Skript som kjører på Mac-en (Jarvis-maskinen) og lager `spending.json`, som du
 Bare standardbiblioteket (Python 3.9+).
 
 ```bash
+rema auth login                                     # én gang, med DITT telefonnummer (rema1000-cli)
 cd ingest
-cp .env.example .env        # fyll inn REMA_FIREBASE_REFRESH_TOKEN
 python3 rema.py --out spending-rema.json            # alle transaksjoner API-et gir
 python3 rema.py --out spending-rema.json --since 2026-09-01
+python3 rema.py --offers rema-offers.json           # REMA Superpris med strekkoder (trenger `brew install brotli`)
 python3 rema.py --dump-heads                        # skriv rå transaksjonsliste (for feilsøking)
 ```
 
-**Token:** REMA-appen logger inn med telefonnummer (id.rema.no → Firebase). Enklest er å logge inn
-med `rema1000-cli` (`rema auth login`) og kopiere Firebase *refresh token* fra dens token-fil inn i
-`.env`. Skriptet bytter refresh token mot et kortlivet ID-token ved hver kjøring
-(`securetoken.googleapis.com`). Del aldri tokenet.
+**Innlogging:** REMA-appen logger inn med telefonnummer (id.rema.no → Firebase). Logg inn med
+[rema1000-cli](https://github.com/Alfredvc/rema1000-cli) (`rema auth login`); `rema.py` leser tokenet fra
+`~/.rema1000/tokens.json` selv, så du trenger ikke kopiere det noe sted. (Alternativ: `REMA_FIREBASE_REFRESH_TOKEN`
+i `ingest/.env`.) Skriptet bytter det mot et kortlivet ID-token ved hver kjøring og skriver det aldri ut. Del aldri tokenet.
+
+**Strekkoder på tilbud:** Kampanje-endepunktet svarer alltid brotli-komprimert, som Pythons standardbibliotek ikke
+kan pakke ut. `rema.py` bruker `brotli`-modulen eller `brotli`-kommandoen (`brew install brotli`, gratis) hvis de finnes;
+ellers hoppes tilbudene over og kvitteringene synkes som vanlig.
 
 Endepunkter (base `https://api.rema.no`, header `Ocp-Apim-Subscription-Key` + `Authorization: Bearer <firebase-id-token>`):
 
@@ -96,9 +102,23 @@ Appen godtar også en ren liste med kvitteringer.
 nøkkelordkart på varenavnet → nøkkelordkart på `group` → *Ukategorisert*. Differanse over 1 kr mellom
 `total` og summen av linjene havner i *Ukategorisert*.
 
-## Synk til appen (`sync.sh`)
+## Synk til appen (`sync.sh`) – for hvem som helst
 
-`ingest/sync.sh` kjører `rema.py` og pusher `spending.json` til det **private** repoet `olecny/matkassa-data`
-(klonet i `data/`, git-ignorert her). Appen henter fila derfra med en GitHub-nøkkel med kun lesetilgang
-(Mer → Synk fra Mac), når den åpnes og maks én gang i timen. Nøkkelen lagres bare på telefonen.
-Senere, for flere brukere: bytt til ekte innlogging (f.eks. Supabase) i stedet for én nøkkel per bruker.
+Hver bruker har sin egen innlogging, sitt eget private repo og sin egen nøkkel. Ingenting deles mellom brukere,
+og «Tilbud for deg» lærer bare av kvitteringene på brukerens egen telefon.
+
+1. `rema auth login` med ditt eget telefonnummer.
+2. Lag et **privat** GitHub-repo, f.eks. `<deg>/matkassa-data` (tomt).
+3. `cp ingest/.env.example ingest/.env` og sett `MATKASSA_DATA_REPO=<deg>/matkassa-data`.
+4. Kjør `ingest/sync.sh`. Den kloner repoet til `data/` (git-ignorert), skriver `spending.json` og
+   `rema-offers.json` og pusher. Den **nekter å pushe til et offentlig repo**, og stopper hvis `data/` peker på et annet repo.
+5. Lag en *fine-grained* GitHub-nøkkel med bare **Contents: Read** på akkurat det repoet, og lim den inn i appen
+   (Mer → Synk fra Mac, sammen med repo-navnet). Appen henter fila når den åpnes, maks én gang i timen.
+   Nøkkelen lagres bare på den enheten (ikke i backup). På iPhone har Safari og hjem-skjerm-appen hver sin lagring:
+   lim den inn i appen du faktisk bruker.
+
+Ekte flerbruker uten Mac og GitHub (kontoer, Supabase med radnivåsikkerhet) er beskrevet som fase 7 i `plan.md`.
+
+## Formatet `rema-offers.json` (`matkassa.offers/1`)
+`{schema, generated, source:"rema-campaign", chain, offers:[{id, title, desc, price, prePrice, unitPrice, unit, from, till, img, eans:[GTIN…], group}]}`.
+Offentlige tilbud, ingen persondata, men hentet med din innlogging, så de ligger i det private repoet.

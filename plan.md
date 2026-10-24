@@ -1,5 +1,5 @@
 # Plan: Mattilbud-app (tilbud, handleliste og matforbruk)
-*Opprettet 2026-10-24 · Status: Fase 1 bygget og deployet, fase 2 (app-delen) bygget · venter på Oles test på iPhone og ekte kvitteringsdata · Eier: Jarvis · Teknisk vurdering: David*
+*Opprettet 2026-10-24 · Status: Fase 1–2 bygget og deployet, REMA-kvitteringer koblet til, fase 6 (EAN + per bruker + testagent) bygget · venter på Oles test på iPhone · Eier: Jarvis · Teknisk vurdering: David*
 
 **Live:** https://olecny.github.io/matkassa/ · Repo: github.com/olecny/matkassa (bare appkode)
 
@@ -70,8 +70,7 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 | David | finnes | Bygger PWA, adaptere, ingest-skript og kategorimotor | alle / opus |
 | Friday | finnes | Utkast til innsynsforespørsler (Trumf/REMA/Coop). Sender først når Ole har godkjent | e-post |
 | Astrid | finnes | Månedstotaler per kategori inn i regnskapsboka (fase 4) | Excel |
-
-Ingen nye agenter trengs.
+| Tess | ny (2026-10-24) | Tester appen ende til ende etter hver endring (`test/e2e.mjs`, `test/privacy.sh`), skriver PASS/FAIL-rapport | Bash, Read, Write / sonnet |
 
 ## Faser
 
@@ -128,7 +127,28 @@ Ingen nye agenter trengs.
 **Gate 5:**
 - [ ] (Ole) Har brukt appen i én hel handleuke
 
-*(Senere: flerbruker med Supabase gratisnivå og kategorier per bruker.)*
+### Fase 6: Strekkode (EAN) og læring per bruker · **Hvem:** David + Tess
+- [x] Research: har tilbudene strekkoder? *(Tjek: **nei**, ingen EAN/GTIN i `v2/offers`, 0 av 1 097 tilbud; v4 krever API-nøkkel. REMA Superpris-kampanjen: 16 av 16 tilbud har GTIN, men krever egen REMA-innlogging. Kassalapp: EAN → navn/merke/kategori, gratis hobbynivå men krever API-nøkkel, bare fra Mac, ikke tatt i bruk)*
+- [x] EAN først, navn som reserve: profilen kjenner varene på strekkode; tilbud med strekkode matches på EAN, resten på navn; «strekkode»-merke viser treffet
+- [x] REMA Superpris med GTIN: `rema.py --offers` → `rema-offers.json` i brukerens private datarepo → appen fletter GTIN inn i Tjek-tilbudet (samme pris + felles ord) *(denne uken: 13 av 1 099 tilbud ≈ 1,2 % har EAN, alle hos REMA)*
+- [x] Kategorisperre i navnematchingen («Egg» ≠ «Egg nudler»)
+- [x] Per bruker: ingen Ole-standarder i koden (tomt synk-repo, område-velger), `sync.sh` med eget repo i `ingest/.env` og sperre mot offentlige repoer
+- [x] Testagent Tess + `test/e2e.mjs` (CDP, 390×844, falske data) + `test/privacy.sh`
+**Gate 6:**
+- [x] Enhetstester, e2e (falsk og `--live`) og personvernsjekk grønne
+- [ ] (Tess) Uavhengig testrapport
+- [ ] (Ole) «strekkode»-treff sett på telefonen etter `ingest/sync.sh`
+
+### Fase 7 (senere): Ekte flerbruker · **Hvem:** David
+I dag er appen «per bruker» ved at alt ligger på brukerens egen enhet: profilen («Tilbud for deg») bygges bare av kvitteringene i den enhetens IndexedDB, og hver bruker har sin egen REMA-innlogging, sitt eget private datarepo og sin egen lesenøkkel. Det skalerer ikke til folk uten Mac/GitHub. Veien videre, når det trengs:
+- [ ] **Innlogging:** Supabase gratisnivå (Auth med e-postlenke / Sign in with Apple), ingen passord i appen
+- [ ] **Data per bruker:** tabeller `receipts`, `lines`, `rules`, `categories`, `list`, `profile` med `user_id`; **Row Level Security** (`user_id = auth.uid()`) på alle, så ingen kan lese andres data selv med anon-nøkkelen
+- [ ] **Profil per bruker:** bygges fortsatt i klienten fra brukerens egne kvitteringer (ingen deling mellom brukere); eventuelt lagret i `profile` for raskere oppstart
+- [ ] **Kvitteringskilder:** Trumf-/REMA-innhenting kan ikke kjøre i nettleseren (tokens); enten fortsatt Mac-skript per bruker som skriver til Supabase med brukerens egen nøkkel, eller en Edge Function der brukeren selv legger inn sitt token (kryptert). Vurder vilkår og personvern før dette
+- [ ] **Tilbud med EAN:** felles, ikke-personlig tilbudstabell (Tjek + REMA Superpris) som en planlagt jobb fyller; ev. Kassalapp-oppslag EAN → navn med nøkkel bare på serveren
+- [ ] **Personvern:** databehandleroversikt, eksport/sletting av egen konto, ingen kvitteringsdata i logger
+- [ ] Migrering: «Last opp fra denne enheten» flytter IndexedDB-data til kontoen
+**Gate 7:** to testbrukere ser bare sine egne data (RLS-test), og Ole har godkjent kostnad (skal være 0 kr) og vilkår.
 
 ## Risikoer
 - **Uoffisielle API-er (Tjek, REMA, Trumf) brekker eller bryter vilkår** → én adapter per kilde, sjeldne kall, bare egen data, og kvitteringstolking som reserve.
@@ -146,3 +166,4 @@ Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og 
 | 2026-10-24 | 0 | Plan laget. Jarvis researchet kilder, og David verifiserte API-er og anbefalte arkitektur |
 | 2026-10-24 | 1–2 | David bygget Matkassa (PWA): Tjek-tilbud fra 14 kjeder, handleliste med tilbudsmatching, offline, forbruk med Trumf/spending.json-import, regelmotor, backup; REMA-skjelett på Mac. Deployet til olecny.github.io/matkassa. Testet headless (390×844, lys/mørk, offline). Antatte standardvalg for beslutning 1 og 5; ingen e-post sendt, ingen innlogging |
 | 2026-10-24 | 2 | REMA koblet til: Ole logget inn med rema1000-cli (token kun i ~/.rema1000). `rema.py` leser tokenet derfra; første ekte kjøring ga 101 kvitteringer (2024-07-09 → 2026-10-20), 748 varelinjer, varelinjesum = total på alle. Automatisk kategorisering 96,0 % av beløpet (testskript). Import i appen på telefonen gjenstår (Ole) |
+| 2026-10-24 | 6 | David: gjennomgang av Jarvis' tillegg (synk, service worker, skjul kjeder, læring) og rettinger. Strekkode-research: Tjek har ingen EAN (0/1 097), REMA Superpris 16/16 med GTIN → flettet inn, 13 av 1 099 tilbud ≈ 1,2 % har EAN denne uken. EAN-først matching, kategorisperre, per-bruker-oppsett (tomt synk-repo, område, `sync.sh` med eget repo + sperre mot offentlige repoer). Ny testagent Tess, `test/e2e.mjs` (51/51 falsk, 43/43 + 8 hoppet over live), 39/39 enhetstester, personvernsjekk grønn. Rettet: service worker hang på svakt nett (nå 3 s cache-fallback), synk prøvde på nytt ved hver app-veksling etter feil, «Tilbud for deg» ignorerte kjedefilter, repo-feltet kunne ikke tømmes, små knapper < 44 px |
