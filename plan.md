@@ -104,7 +104,7 @@ Ingen nye agenter trengs.
 - [x] Forbruksvisning: per måned, per kategori og trend. JSON-import og -eksport
 **Gate 2:**
 - [ ] Minst én måned med ekte kvitteringer er importert og ≥ 90 % av beløpet er kategorisert
-- [ ] Summen per måned stemmer med kvitteringene (testskript)
+- [x] Summen per måned stemmer med kvitteringene (testskript)
 - [x] Ingen tokens i git (`git grep` sjekket)
 
 ### Fase 3: Kvitteringer fra foto/PDF (~2 økter) · **Hvem:** Dave + Jarvis
@@ -145,3 +145,4 @@ Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og 
 |---|---|---|
 | 2026-10-24 | 0 | Plan laget. Jarvis researchet kilder, og Dave verifiserte API-er og anbefalte arkitektur |
 | 2026-10-24 | 1–2 | Dave bygget Matkassa (PWA): Tjek-tilbud fra 14 kjeder, handleliste med tilbudsmatching, offline, forbruk med Trumf/spending.json-import, regelmotor, backup; REMA-skjelett på Mac. Deployet til olecny.github.io/matkassa. Testet headless (390×844, lys/mørk, offline). Antatte standardvalg for beslutning 1 og 5; ingen e-post sendt, ingen innlogging |
+| 2026-10-24 | 2 | REMA koblet til: Ole logget inn med rema1000-cli (token kun i ~/.rema1000). `rema.py` leser tokenet derfra; første ekte kjøring ga 101 kvitteringer (2024-07-09 → 2026-10-20), 748 varelinjer, varelinjesum = total på alle. Automatisk kategorisering 96,0 % av beløpet (testskript). Import i appen på telefonen gjenstår (Ole) |
