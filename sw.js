@@ -1,6 +1,6 @@
 // Matkassa service worker: precache the app shell, cache offer images.
 // Offer data itself is stored by the app in IndexedDB, so offers work offline too.
-const VERSION = 'matkassa-v2';
+const VERSION = 'matkassa-v3';
 const SHELL = [
   './',
   'index.html',
@@ -42,17 +42,18 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // App shell: stale-while-revalidate.
+  // App shell: network first so updates show up at once; cache when offline.
   if (url.origin === self.location.origin) {
     e.respondWith(
       caches.open(VERSION).then(async (c) => {
-        const cached = await c.match(req, { ignoreSearch: true });
-        const net = fetch(req)
-          .then((res) => { if (res.ok) c.put(req, res.clone()); return res; })
-          .catch(() => null);
-        if (cached) { e.waitUntil(net); return cached; }
-        const res = await net;
-        return res || (req.mode === 'navigate' ? c.match('index.html') : Response.error());
+        try {
+          const res = await fetch(req, { cache: 'no-cache' });
+          if (res.ok) c.put(req, res.clone());
+          return res;
+        } catch {
+          const cached = await c.match(req, { ignoreSearch: true });
+          return cached || (req.mode === 'navigate' ? c.match('index.html') : Response.error());
+        }
       }),
     );
     return;
