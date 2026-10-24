@@ -3,7 +3,7 @@
 // Cache names are per app: Matkassa Premium lives on the same GitHub Pages origin and its caches must survive
 // this worker's cleanup, so only delete caches with this app's own prefix.
 const PREFIX = 'matkassa-v';
-const VERSION = PREFIX + '7';
+const VERSION = PREFIX + '8';
 const SHELL = [
   './',
   'index.html',
@@ -17,6 +17,8 @@ const SHELL = [
   'js/profile.js',
   'js/extra-offers.js',
   'js/settings.js',
+  'js/cloud.js',
+  'js/cloud-config.js',
   'icons/icon.svg',
   'icons/icon-192.png',
   'icons/icon-512.png',
