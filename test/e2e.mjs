@@ -240,11 +240,15 @@ async function a11yAudit(where) {
     }
     out.imgsNoAlt = [...document.images].filter((i) => !i.hasAttribute('alt')).length;
     out.lang = document.documentElement.lang;
+    // iOS zooms into any field under 16 px; check every field, also those in closed sheets
+    out.small = [...document.querySelectorAll('input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=color]), select, textarea')]
+      .filter((i) => parseFloat(getComputedStyle(i).fontSize) < 16).map((i) => (i.id || i.name || i.className) + ' ' + getComputedStyle(i).fontSize);
     return out;`);
   check(!r.unnamedButtons.length, `a11y ${where}: every button has a name`, r.unnamedButtons.join(' | '));
   check(!r.unlabelledInputs.length, `a11y ${where}: every input has a label`, r.unlabelledInputs.join(' | '));
   check(r.imgsNoAlt === 0, `a11y ${where}: images have alt`);
   check(r.lang === 'nb' || r.lang === 'no', `a11y ${where}: <html lang> is Norwegian`, r.lang);
+  check(!r.small.length, `mobile ${where}: every input/select/textarea ≥ 16 px (no iOS zoom)`, r.small.join(' | '));
   if (r.smallTargets.length) warn(`a11y ${where}: tap targets under 44px`, [...new Set(r.smallTargets)].slice(0, 6).join(' | '));
 }
 

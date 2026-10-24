@@ -109,7 +109,8 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 0; }
 .wide { width: 100%; margin-top: 12px; }
 
 /* Tilbud toolbar */
-.toolbar { display: flex; gap: 8px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.toolbar .search { flex: 1 1 170px; }
 .search {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 44px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0 12px;
@@ -117,8 +118,8 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 0; }
 .search svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--text-3); stroke-width: 2; stroke-linecap: round; }
 .search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; min-height: 42px; font-size: 16px; }
 .sort select {
-  min-height: 44px; max-width: 120px; border-radius: 12px; border: 1px solid var(--border);
-  background: var(--surface); padding: 0 8px; font-size: .9rem;
+  min-height: 44px; max-width: 170px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface); padding: 0 8px; font-size: 16px; /* < 16 px: iOS zooms on focus */
 }
 .chips {
   display: flex; gap: 6px; overflow-x: auto; padding: 10px 16px 2px; margin: 0 -16px;
@@ -280,7 +281,7 @@ dialog input:not([type="checkbox"]), dialog select, dialog textarea {
 dialog label.check { display: flex; align-items: center; gap: 8px; font-weight: 500; }
 dialog label.check input { width: 22px; height: 22px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.dlg-actions { display: flex; gap: 8px; justify-content: flex-end; position: sticky; bottom: 0; background: var(--surface); padding: 8px 0; } /* stay reachable with large text */
 .dlg-actions .btn { flex: 1; }
 .form-error { color: var(--danger); margin: 0; font-size: .85rem; min-height: 0; }
 .rule-item { margin: 0; color: var(--text-2); }
@@ -356,6 +357,5 @@ dialog label.check input { width: 22px; height: 22px; }
 /* Narrow phones (iPhone SE 1st gen, 320 px): keep search + sort on one line without sideways scroll. */
 .sort { flex: none; }
 @media (max-width: 360px) {
-  .sort select { max-width: 96px; }
   .search { padding: 0 8px; gap: 6px; }
 }
