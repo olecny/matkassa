@@ -70,7 +70,7 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 | David | finnes | Bygger PWA, adaptere, ingest-skript og kategorimotor | alle / opus |
 | Friday | finnes | Utkast til innsynsforespørsler (Trumf/REMA/Coop). Sender først når Ole har godkjent | e-post |
 | Astrid | finnes | Månedstotaler per kategori inn i regnskapsboka (fase 4) | Excel |
-| Tess | ny (2026-10-24) | Tester appen ende til ende etter hver endring (`test/e2e.mjs`, `test/privacy.sh`), skriver PASS/FAIL-rapport | Bash, Read, Write / sonnet |
+| Maria | ny (2026-10-24) | Tester appen ende til ende etter hver endring (`test/e2e.mjs`, `test/privacy.sh`), skriver PASS/FAIL-rapport | Bash, Read, Write / sonnet |
 
 ## Faser
 
@@ -127,16 +127,16 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 **Gate 5:**
 - [ ] (Ole) Har brukt appen i én hel handleuke
 
-### Fase 6: Strekkode (EAN) og læring per bruker · **Hvem:** David + Tess
+### Fase 6: Strekkode (EAN) og læring per bruker · **Hvem:** David + Maria
 - [x] Research: har tilbudene strekkoder? *(Tjek: **nei**, ingen EAN/GTIN i `v2/offers`, 0 av 1 097 tilbud; v4 krever API-nøkkel. REMA Superpris-kampanjen: 16 av 16 tilbud har GTIN, men krever egen REMA-innlogging. Kassalapp: EAN → navn/merke/kategori, gratis hobbynivå men krever API-nøkkel, bare fra Mac, ikke tatt i bruk)*
 - [x] EAN først, navn som reserve: profilen kjenner varene på strekkode; tilbud med strekkode matches på EAN, resten på navn; «strekkode»-merke viser treffet
 - [x] REMA Superpris med GTIN: `rema.py --offers` → `rema-offers.json` i brukerens private datarepo → appen fletter GTIN inn i Tjek-tilbudet (samme pris + felles ord) *(denne uken: 13 av 1 099 tilbud ≈ 1,2 % har EAN, alle hos REMA)*
 - [x] Kategorisperre i navnematchingen («Egg» ≠ «Egg nudler»)
 - [x] Per bruker: ingen Ole-standarder i koden (tomt synk-repo, område-velger), `sync.sh` med eget repo i `ingest/.env` og sperre mot offentlige repoer
-- [x] Testagent Tess + `test/e2e.mjs` (CDP, 390×844, falske data) + `test/privacy.sh`
+- [x] Testagent Maria + `test/e2e.mjs` (CDP, 390×844, falske data) + `test/privacy.sh`
 **Gate 6:**
 - [x] Enhetstester, e2e (falsk og `--live`) og personvernsjekk grønne
-- [x] (Tess) Uavhengig testrapport *(PASS, 1 major + 4 minor, alle rettet i 0.4.1)*
+- [x] (Maria) Uavhengig testrapport *(PASS, 1 major + 4 minor, alle rettet i 0.4.1)*
 - [ ] (Ole) «strekkode»-treff sett på telefonen etter `ingest/sync.sh`
 
 ### Fase 7 (senere): Ekte flerbruker · **Hvem:** David
@@ -166,5 +166,5 @@ Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og 
 | 2026-10-24 | 0 | Plan laget. Jarvis researchet kilder, og David verifiserte API-er og anbefalte arkitektur |
 | 2026-10-24 | 1–2 | David bygget Matkassa (PWA): Tjek-tilbud fra 14 kjeder, handleliste med tilbudsmatching, offline, forbruk med Trumf/spending.json-import, regelmotor, backup; REMA-skjelett på Mac. Deployet til olecny.github.io/matkassa. Testet headless (390×844, lys/mørk, offline). Antatte standardvalg for beslutning 1 og 5; ingen e-post sendt, ingen innlogging |
 | 2026-10-24 | 2 | REMA koblet til: Ole logget inn med rema1000-cli (token kun i ~/.rema1000). `rema.py` leser tokenet derfra; første ekte kjøring ga 101 kvitteringer (2024-07-09 → 2026-10-20), 748 varelinjer, varelinjesum = total på alle. Automatisk kategorisering 96,0 % av beløpet (testskript). Import i appen på telefonen gjenstår (Ole) |
-| 2026-10-24 | 6 | David: gjennomgang av Jarvis' tillegg (synk, service worker, skjul kjeder, læring) og rettinger. Strekkode-research: Tjek har ingen EAN (0/1 097), REMA Superpris 16/16 med GTIN → flettet inn, 13 av 1 099 tilbud ≈ 1,2 % har EAN denne uken. EAN-først matching, kategorisperre, per-bruker-oppsett (tomt synk-repo, område, `sync.sh` med eget repo + sperre mot offentlige repoer). Ny testagent Tess, `test/e2e.mjs` (51/51 falsk, 43/43 + 8 hoppet over live), 39/39 enhetstester, personvernsjekk grønn. Rettet: service worker hang på svakt nett (nå 3 s cache-fallback), synk prøvde på nytt ved hver app-veksling etter feil, «Tilbud for deg» ignorerte kjedefilter, repo-feltet kunne ikke tømmes, små knapper < 44 px |
-| 2026-10-24 | 6 | Tess testet 0.4.0: PASS, 1 major + 4 minor. David rettet i 0.4.1: service worker åpnet på ~9 s ved svakt nett (3 s per nivå i lastekjeden) → etter én treg forespørsel serveres resten fra cache, målt 3,3 s; vannrett rulling på 320 px; tom-tilstand når alle kjeder er skjult (peker til Mer → Kjeder); tilbudskoblet handlelistevare viste skjult kjede; backup-gjenoppretting kan ikke lenger endre synk-repo, og ødelagte innstillinger (område uten koordinater) renses (`js/settings.js`). Tester: enhet 47/47, e2e 61/61 (falsk) og 53/53 + 8 hoppet over (live), personvern 8/8 |
+| 2026-10-24 | 6 | David: gjennomgang av Jarvis' tillegg (synk, service worker, skjul kjeder, læring) og rettinger. Strekkode-research: Tjek har ingen EAN (0/1 097), REMA Superpris 16/16 med GTIN → flettet inn, 13 av 1 099 tilbud ≈ 1,2 % har EAN denne uken. EAN-først matching, kategorisperre, per-bruker-oppsett (tomt synk-repo, område, `sync.sh` med eget repo + sperre mot offentlige repoer). Ny testagent Maria, `test/e2e.mjs` (51/51 falsk, 43/43 + 8 hoppet over live), 39/39 enhetstester, personvernsjekk grønn. Rettet: service worker hang på svakt nett (nå 3 s cache-fallback), synk prøvde på nytt ved hver app-veksling etter feil, «Tilbud for deg» ignorerte kjedefilter, repo-feltet kunne ikke tømmes, små knapper < 44 px |
+| 2026-10-24 | 6 | Maria testet 0.4.0: PASS, 1 major + 4 minor. David rettet i 0.4.1: service worker åpnet på ~9 s ved svakt nett (3 s per nivå i lastekjeden) → etter én treg forespørsel serveres resten fra cache, målt 3,3 s; vannrett rulling på 320 px; tom-tilstand når alle kjeder er skjult (peker til Mer → Kjeder); tilbudskoblet handlelistevare viste skjult kjede; backup-gjenoppretting kan ikke lenger endre synk-repo, og ødelagte innstillinger (område uten koordinater) renses (`js/settings.js`). Tester: enhet 47/47, e2e 61/61 (falsk) og 53/53 + 8 hoppet over (live), personvern 8/8 |

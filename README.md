@@ -28,7 +28,7 @@ node test/e2e.mjs                # headless Chrome 390×844 over CDP, falskt net
 node test/e2e.mjs --live         # samme mot ekte Tjek-tilbud (bare lesing)
 test/privacy.sh                  # ingen tokens/persondata i det offentlige repoet
 ```
-Testagenten **Tess** (`project-jarvis/.claude/agents/tess.md`) kjører disse og skriver en PASS/FAIL-rapport.
+Testagenten **Maria** (`project-jarvis/.claude/agents/maria.md`) kjører disse og skriver en PASS/FAIL-rapport.
 All testdata i `test/fake/` er oppdiktet og merket `FAKE`.
 Ingen byggesteg, ingen avhengigheter: vanilla HTML/CSS/JS-moduler.
 

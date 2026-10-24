@@ -333,7 +333,7 @@ try {
   const item = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('matkassa'); q.onsuccess = () => r(q.result); }); return await new Promise(r => { const q = db.transaction('kv').objectStore('kv').get('list'); q.onsuccess = () => r(q.result.find(i => /Kjeldsberg/i.test(i.text))); });`);
   fixtureCheck(item && item.eans && item.eans.includes('2000000000015'), 'list: item added from an offer remembers its barcode');
 
-  // 7b. Hiding the chain of an offer-linked list item hides its "Tilbud hos …" too (Tess finding 4)
+  // 7b. Hiding the chain of an offer-linked list item hides its "Tilbud hos …" too (Maria finding 4)
   const linkedChain = item && item.offer ? item.offer.chainId : null;
   const linkedName = item && item.offer ? item.offer.chain : '';
   await tab('mer');
@@ -344,7 +344,7 @@ try {
   await tab('mer');
   await evaluate(`document.querySelector('[data-chainshow="${linkedChain}"]').click(); return true;`);
 
-  // 7c. All chains hidden → helpful empty state with a way back (Tess finding 3)
+  // 7c. All chains hidden → helpful empty state with a way back (Maria finding 3)
   await evaluate(`for (const cb of document.querySelectorAll('[data-chainshow]')) if (cb.checked) cb.click(); return true;`);
   await tab('tilbud');
   const emptyText = await evaluate(`return document.querySelector('#offer-empty').hidden ? '' : document.querySelector('#offer-empty').textContent;`);
@@ -357,7 +357,7 @@ try {
   await a11yAudit('liste');
   await shot('05-liste');
 
-  // 7d. Narrow phone (iPhone SE 1st gen, 320 px): no sideways scroll on any tab (Tess finding 2)
+  // 7d. Narrow phone (iPhone SE 1st gen, 320 px): no sideways scroll on any tab (Maria finding 2)
   await send('Emulation.setDeviceMetricsOverride', { width: 320, height: 568, deviceScaleFactor: 2, mobile: true }, S);
   for (const t of ['tilbud', 'liste', 'forbruk', 'mer']) { await tab(t); check(await noHScroll(), `320 px: no horizontal scroll on ${t}`); }
   await tab('tilbud');
@@ -401,7 +401,7 @@ try {
   // 11. Offline: service worker serves the app shell, data stays
   check(await waitFor(`navigator.serviceWorker && navigator.serviceWorker.controller`, 15000) || (await navigate(BASE + 'index.html'), await waitFor(`navigator.serviceWorker.controller`, 15000)), 'service worker controls the page');
   // 11a. Weak signal: the server answers nothing for 8 s. The app must open from cache in ~3 s, not 3 s per
-  // waterfall level (index.html → app.js → module imports) (Tess finding 1).
+  // waterfall level (index.html → app.js → module imports) (Maria finding 1).
   await navigate(BASE + 'index.html');
   await waitFor(`document.querySelectorAll('#offer-list li').length > 0`);
   stallMs = 8000;

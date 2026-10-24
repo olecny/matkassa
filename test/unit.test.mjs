@@ -83,7 +83,7 @@ const appSrc = fs.readFileSync(new URL('../js/app.js', import.meta.url), 'utf8')
 ok(!/olecny/i.test(appSrc), 'app.js has no hard-wired personal repo');
 ok(defaultSettings().sync.repo === '' && defaultSettings().area === null, 'sync repo default is empty, no area set');
 
-/* ---------- settings restore hardening (Tess finding 5) ---------- */
+/* ---------- settings restore hardening (Maria finding 5) ---------- */
 const mine = { ...defaultSettings(), sync: { ...defaultSettings().sync, repo: 'me/my-data-FAKE', token: 'FAKE-TOKEN-NOT-REAL', lastSync: 5 } };
 const hostile = { chains: null, hiddenChains: 'abc', area: { name: 'X' }, sync: { repo: 'evil/other-FAKE', token: 'FAKE-OTHER', path: '../x' } };
 const restored = mergeSettings(mine, hostile, { fromBackup: true });
@@ -95,7 +95,7 @@ const loaded = mergeSettings(defaultSettings(), { sync: { repo: 'me/my-data-FAKE
 ok(loaded.sync.repo === 'me/my-data-FAKE' && loaded.sync.token === 'FAKE-TOKEN-NOT-REAL' && loaded.area.name === 'Oslo', 'load from device storage keeps sync + area');
 ok(mergeSettings(defaultSettings(), undefined).sync.path === 'spending.json', 'missing settings → defaults');
 
-/* ---------- service worker: slow-network window (Tess finding 1) ---------- */
+/* ---------- service worker: slow-network window (Maria finding 1) ---------- */
 const swSrc = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 ok(/slowUntil/.test(swSrc) && /if \(degraded\) return cached/.test(swSrc), 'sw: after one slow request the rest of the load is served from cache');
 const missing = fs.readdirSync(new URL('../js/', import.meta.url)).filter((f) => f.endsWith('.js') && !swSrc.includes(`'js/${f}'`));
