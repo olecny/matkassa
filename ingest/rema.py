@@ -75,15 +75,24 @@ def http(method, url, headers=None, data=None):
     if data is not None:
         body = urllib.parse.urlencode(data).encode()
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            raw = res.read()
-            if res.headers.get("Content-Encoding") == "br":
-                raw = unbrotli(raw)
-            return json.loads(raw.decode("utf-8") or "null")
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:300]
-        raise SystemExit(f"HTTP {e.code} for {url}: {detail}")
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as res:
+                raw = res.read()
+                if res.headers.get("Content-Encoding") == "br":
+                    raw = unbrotli(raw)
+                return json.loads(raw.decode("utf-8") or "null")
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 502, 503, 504) and attempt < 3:
+                time.sleep(2 ** attempt * 2)
+                continue
+            detail = e.read().decode("utf-8", "replace")[:300]
+            raise SystemExit(f"HTTP {e.code} for {url.split('?')[0]}: {detail}")
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            # Transient network drops happen during long runs (100+ calls); back off and retry.
+            if attempt == 3:
+                raise SystemExit(f"Nettverksfeil mot {url.split('?')[0]}: {e}")
+            time.sleep(2 ** attempt * 2)
 
 
 def id_token(env):
