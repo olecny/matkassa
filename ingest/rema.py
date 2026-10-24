@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""REMA 1000 -> Matkassa spending.json (schema matkassa.spending/1).
+"""REMA 1000 -> Matkassa spending.json (schema matkassa.spending/1) and rema-offers.json (matkassa.offers/1).
 
-UNTESTED against a live account: written from the endpoint documentation in
-github.com/Alfredvc/rema1000-cli (API.md, captured 2026-04-06). Unofficial API,
-own data only. Token lives in ingest/.env (git-ignored), never in code or git.
+Endpoints from github.com/Alfredvc/rema1000-cli (API.md). Unofficial API, the user's own data only.
+Each user logs in with their own phone number (`rema auth login`); the token stays in ~/.rema1000/ or
+ingest/.env (both outside git) and is never printed.
 
 Usage:
     python3 rema.py --out spending-rema.json [--since 2026-09-01] [--limit 200]
+    python3 rema.py --offers rema-offers.json      # REMA "Superpris" campaign with barcodes (GTIN)
     python3 rema.py --dump-heads
 """
 import argparse
+import re
+import shutil
+import subprocess
 import datetime as dt
 import json
 import os
@@ -23,6 +27,7 @@ import uuid
 API = "https://api.rema.no"
 # Public app keys from the REMA app (documented in rema1000-cli). Not secrets of Ole's.
 BELLA_KEY = "fb5e24884b504d0bad761098f77e6605"
+CAMPAIGN_KEY = "e8494ceb23754fc4911c81b166e0a97f"
 FIREBASE_API_KEY = "AIzaSyBi9PlJsUo5FAqljPHuh0WQCsaOSW4rFQs"
 FIREBASE_TOKEN_URL = "https://securetoken.googleapis.com/v1/token"
 APP_VERSION = "3.13.0.1181"
@@ -52,6 +57,19 @@ def load_env(path=os.path.join(HERE, ".env")):
     return env
 
 
+def unbrotli(raw):
+    """The campaign endpoint always answers brotli-compressed; Python's stdlib can't decode that."""
+    try:
+        import brotli  # pip install brotli (optional)
+        return brotli.decompress(raw)
+    except ImportError:
+        pass
+    exe = shutil.which("brotli")  # brew install brotli (free)
+    if not exe:
+        raise SystemExit("REMA svarer brotli-komprimert. Installer brotli (`brew install brotli`) for å hente tilbudene.")
+    return subprocess.run([exe, "-d", "-c"], input=raw, capture_output=True, check=True).stdout
+
+
 def http(method, url, headers=None, data=None):
     body = None
     if data is not None:
@@ -59,7 +77,10 @@ def http(method, url, headers=None, data=None):
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=30) as res:
-            return json.loads(res.read().decode("utf-8") or "null")
+            raw = res.read()
+            if res.headers.get("Content-Encoding") == "br":
+                raw = unbrotli(raw)
+            return json.loads(raw.decode("utf-8") or "null")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
         raise SystemExit(f"HTTP {e.code} for {url}: {detail}")
@@ -69,7 +90,7 @@ def id_token(env):
     """Exchange the long-lived Firebase refresh token for a short-lived ID token."""
     refresh = env.get("REMA_FIREBASE_REFRESH_TOKEN")
     if not refresh:
-        raise SystemExit("Mangler REMA_FIREBASE_REFRESH_TOKEN i ingest/.env (se README.md).")
+        raise SystemExit("Fant ingen REMA-innlogging. Kjør `rema auth login` (rema1000-cli) først, se ingest/README.md.")
     res = http("POST", f"{FIREBASE_TOKEN_URL}?key={FIREBASE_API_KEY}",
                {"Content-Type": "application/x-www-form-urlencoded"},
                {"grant_type": "refresh_token", "refresh_token": refresh})
@@ -161,16 +182,76 @@ def to_receipt(head, rows):
     }
 
 
+def price_of(o):
+    try:
+        return round(int(o.get("prisKroner") or 0) + int(o.get("prisOerer") or 0) / 100, 2)
+    except ValueError:
+        return None
+
+
+def unit_price(text):
+    m = re.search(r"(\d+[.,]\d{2})\s*PR\.?\s*(KG|L)\b", text or "", re.I)
+    return (float(m.group(1).replace(",", ".")), m.group(2).lower()) if m else (None, None)
+
+
+def campaign_offers(h):
+    """REMA's Superpris campaign (the only REMA offer feed with GTINs) -> matkassa.offers/1."""
+    ch = dict(h, **{"Ocp-Apim-Subscription-Key": CAMPAIGN_KEY})
+    campaigns = http("GET", f"{API}/v1/papirflycampaign/campaigns?type=SP&includeOffers=true&feed=true", ch) or []
+    offers = []
+    for c in campaigns:
+        if not c.get("active"):
+            continue
+        for o in (c.get("offers") or {}).get("offers") or []:
+            price = price_of(o)
+            gtins = sorted({str(g) for p in o.get("products") or [] for g in p.get("gtin") or [] if str(g).isdigit()})
+            if price is None or not o.get("title"):
+                continue
+            dates = (o.get("validDates") or [{}])[0]
+            up, unit = unit_price(o.get("undertekst"))
+            before = o.get("beforePrice") or None
+            offers.append({
+                "id": f"rema-sp-{c.get('campaignId')}-{o.get('productId')}",
+                "title": o["title"].strip(),
+                "desc": (o.get("undertekst") or "").strip(),
+                "price": price,
+                "prePrice": before if o.get("hasBeforePrice") and before else None,
+                "unitPrice": up,
+                "unit": unit,
+                "from": dates.get("from") or c.get("validFrom"),
+                "till": dates.get("to") or c.get("validTo"),
+                "img": o.get("imageUrl"),
+                "eans": gtins,
+                "group": o.get("cohort"),
+            })
+    return offers
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=os.path.join(HERE, "spending-rema.json"))
     ap.add_argument("--since", help="YYYY-MM-DD, hopp over eldre kjøp")
     ap.add_argument("--limit", type=int, default=500)
     ap.add_argument("--dump-heads", action="store_true", help="skriv rå svar fra /heads og avslutt")
+    ap.add_argument("--offers", metavar="FIL", help="hent REMA Superpris-tilbud med strekkoder (GTIN) til FIL og avslutt")
     args = ap.parse_args()
 
     env = load_env()
     h = headers(id_token(env), env)
+    if args.offers:
+        offers = campaign_offers(h)
+        out = {
+            "schema": "matkassa.offers/1",
+            "generated": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "source": "rema-campaign",
+            "chain": "REMA 1000",
+            "offers": offers,
+        }
+        with open(args.offers, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+        n = sum(1 for o in offers if o["eans"])
+        print(f"Skrev {len(offers)} REMA-tilbud ({n} med strekkode) til {args.offers}", file=sys.stderr)
+        return
     heads = http("GET", f"{API}/v1/bella/transaction/v2/heads", h)
     if args.dump_heads:
         json.dump(heads, sys.stdout, ensure_ascii=False, indent=2)

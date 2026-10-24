@@ -51,7 +51,7 @@ Appen godtar også en ren liste med kvitteringer.
       "id": "rema-1001414032394",
       "source": "rema",
       "chain": "REMA 1000",
-      "store": "REMA 1000 Moholt",
+      "store": "REMA 1000 Sentrum",
       "date": "2026-10-20",
       "time": "17:32",
       "total": 412.50,
