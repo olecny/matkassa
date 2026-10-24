@@ -1,5 +1,5 @@
 # Plan: Mattilbud-app (tilbud, handleliste og matforbruk)
-*Opprettet 2026-10-24 · Status: Fase 1 bygget og deployet, fase 2 (app-delen) bygget · venter på Oles test på iPhone og ekte kvitteringsdata · Eier: Jarvis · Teknisk vurdering: Dave*
+*Opprettet 2026-10-24 · Status: Fase 1 bygget og deployet, fase 2 (app-delen) bygget · venter på Oles test på iPhone og ekte kvitteringsdata · Eier: Jarvis · Teknisk vurdering: David*
 
 **Live:** https://olecny.github.io/matkassa/ · Repo: github.com/olecny/matkassa (bare appkode)
 
@@ -8,7 +8,7 @@ En norsk app på mobilen som (1) viser ukens mattilbud fra kjedene Ole handler i
 
 **Ferdig når:** appen er installert på Oles telefon via *Legg til på Hjem-skjerm*, viser denne ukens tilbud, har en handleliste som virker offline og viser forbruk per kategori for minst én måned med ekte kvitteringsdata.
 
-## Researchfunn (Jarvis + Dave, 2026-10-24)
+## Researchfunn (Jarvis + David, 2026-10-24)
 
 ### Tilbudsdata
 | Kilde | Hva | Vurdering |
@@ -56,7 +56,7 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 4. Skal Friday sende GDPR-innsynsforespørsler til Trumf, REMA og Coop nå for å få historikk? *Anbefalt: ja. Det er gratis og har lavest risiko. Det er en utgående handling, så du godkjenner utkastene.*
 5. Kategorier: standardlisten under eller din egen?
 6. Skal tilbud arkiveres ukentlig i et privat repo for prishistorikk? *Anbefalt: ja.*
-7. Skal Penny føre månedstotaler inn i regnskapsboka automatisk eller ved forespørsel? *Anbefalt: ved forespørsel først.*
+7. Skal Astrid føre månedstotaler inn i regnskapsboka automatisk eller ved forespørsel? *Anbefalt: ved forespørsel først.*
 
 **Antatt (kan endres når som helst):**
 - Appnavn: «Matkassa» (arbeidsnavn). UI på norsk (bokmål), lys og mørk modus.
@@ -67,9 +67,9 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 | Agent | Status | Rolle i oppgaven | Verktøy / modell |
 |---|---|---|---|
 | Jarvis | finnes | Orkestrerer, snakker med Ole og krysser av gates | – |
-| Dave | finnes | Bygger PWA, adaptere, ingest-skript og kategorimotor | alle / opus |
+| David | finnes | Bygger PWA, adaptere, ingest-skript og kategorimotor | alle / opus |
 | Friday | finnes | Utkast til innsynsforespørsler (Trumf/REMA/Coop). Sender først når Ole har godkjent | e-post |
-| Penny | finnes | Månedstotaler per kategori inn i regnskapsboka (fase 4) | Excel |
+| Astrid | finnes | Månedstotaler per kategori inn i regnskapsboka (fase 4) | Excel |
 
 Ingen nye agenter trengs.
 
@@ -83,7 +83,7 @@ Ingen nye agenter trengs.
 - [ ] Alle 7 beslutninger er notert i denne planen
 - [ ] (Ole) Innsynsutkast godkjent og sendt, eller valgt bort
 
-### Fase 1: MVP – Tilbud + handleliste (~2–3 økter) · **Hvem:** Dave
+### Fase 1: MVP – Tilbud + handleliste (~2–3 økter) · **Hvem:** David
 - [x] Tjek-adapter: hent ukens tilbud for Oles kjeder og normaliser pris og enhetspris *(alle 14 dagligvarekjeder rundt Trondheim, filter i appen)*
 - [x] Tilbudsvisning: søk, filtrer på kjede og kategori (nøkkelordkart), gyldig til-dato
 - [x] Handleliste: legg til, kryss av og slett. Lagres i IndexedDB
@@ -96,7 +96,7 @@ Ingen nye agenter trengs.
 - [x] Ingen tilbudsdata er committet i det offentlige repoet (`git ls-files` sjekket)
 - [ ] (Ole) Installert på telefonen og testet i butikken
 
-### Fase 2: Forbruk v1 (~2–3 økter) · **Hvem:** Dave
+### Fase 2: Forbruk v1 (~2–3 økter) · **Hvem:** David
 - [ ] `ingest.py` på Mac med REMA- og/eller Trumf-adapter (tokens i `.env`) *(skjelett `ingest/rema.py` laget, utestet uten token; Trumf importeres direkte i appen)*
 - [x] Import av Trumf-innsyns-JSON (historikk) *(testet med testfil, ikke ekte innsyn ennå)*
 - [x] Felles kvitteringsformat (`spending.json`): dato, kjede, varelinjer, beløp, kategori *(se `ingest/README.md`)*
@@ -107,19 +107,19 @@ Ingen nye agenter trengs.
 - [x] Summen per måned stemmer med kvitteringene (testskript)
 - [x] Ingen tokens i git (`git grep` sjekket)
 
-### Fase 3: Kvitteringer fra foto/PDF (~2 økter) · **Hvem:** Dave + Jarvis
+### Fase 3: Kvitteringer fra foto/PDF (~2 økter) · **Hvem:** David + Jarvis
 - [ ] Mappe `inbox/` der Ole slipper bilder og PDF-er (f.eks. via iCloud)
 - [ ] Claude Code-rutine eller -skill som tolker kvitteringer til `spending.json`
 - [ ] Kategoriseringsforslag som Ole godkjenner i appen
 **Gate 3:**
 - [ ] 5 ekte kvitteringsbilder blir tolket med riktig totalsum
 
-### Fase 4: Integrasjoner og prishistorikk · **Hvem:** Dave + Penny
+### Fase 4: Integrasjoner og prishistorikk · **Hvem:** David + Astrid
 - [ ] Ukentlig arkiv av tilbud i et privat repo (hvis beslutning 6 = ja)
-- [ ] Penny: månedstotaler per kategori inn i regnskapsboka
+- [ ] Astrid: månedstotaler per kategori inn i regnskapsboka
 - [ ] Budsjett per kategori med varsel i appen
 **Gate 4:**
-- [ ] Penny har ført én måned uten avvik mot appen
+- [ ] Astrid har ført én måned uten avvik mot appen
 
 ### Fase 5: Verifiser og overlever
 - [x] README med hvordan du installerer, importerer og legger til kategorier
@@ -143,6 +143,6 @@ Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og 
 ## Logg
 | Tid | Fase | Hva skjedde |
 |---|---|---|
-| 2026-10-24 | 0 | Plan laget. Jarvis researchet kilder, og Dave verifiserte API-er og anbefalte arkitektur |
-| 2026-10-24 | 1–2 | Dave bygget Matkassa (PWA): Tjek-tilbud fra 14 kjeder, handleliste med tilbudsmatching, offline, forbruk med Trumf/spending.json-import, regelmotor, backup; REMA-skjelett på Mac. Deployet til olecny.github.io/matkassa. Testet headless (390×844, lys/mørk, offline). Antatte standardvalg for beslutning 1 og 5; ingen e-post sendt, ingen innlogging |
+| 2026-10-24 | 0 | Plan laget. Jarvis researchet kilder, og David verifiserte API-er og anbefalte arkitektur |
+| 2026-10-24 | 1–2 | David bygget Matkassa (PWA): Tjek-tilbud fra 14 kjeder, handleliste med tilbudsmatching, offline, forbruk med Trumf/spending.json-import, regelmotor, backup; REMA-skjelett på Mac. Deployet til olecny.github.io/matkassa. Testet headless (390×844, lys/mørk, offline). Antatte standardvalg for beslutning 1 og 5; ingen e-post sendt, ingen innlogging |
 | 2026-10-24 | 2 | REMA koblet til: Ole logget inn med rema1000-cli (token kun i ~/.rema1000). `rema.py` leser tokenet derfra; første ekte kjøring ga 101 kvitteringer (2024-07-09 → 2026-10-20), 748 varelinjer, varelinjesum = total på alle. Automatisk kategorisering 96,0 % av beløpet (testskript). Import i appen på telefonen gjenstår (Ole) |
