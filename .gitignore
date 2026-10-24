@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.local.json
+spending*.json
+offers*.json
+archive/
+data/
+screenshots/
+test/fixtures/
+node_modules/
+.DS_Store
+__pycache__/
