@@ -4,7 +4,7 @@ import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categor
 import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
-import { detectImport, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
+import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 
 const APP_VERSION = '0.5.0';
@@ -609,7 +609,7 @@ function renderSpending() {
   body._uncat = uncatMonth;
 }
 
-const sourceName = (s) => ({ trumf: 'Trumf', rema: 'REMA', manual: 'manuell', import: 'import', claude: 'kvitteringsfoto' }[s] || s);
+const sourceName = (s) => ({ trumf: 'Trumf', rema: 'REMA', coop: 'Coop', manual: 'manuell', import: 'import', claude: 'kvitteringsfoto' }[s] || s);
 
 function trendSVG(months) {
   const keys = [];
@@ -755,16 +755,9 @@ function saveManualReceipt() {
 
 /* ---------- import / export ---------- */
 async function importFile(file) {
-  let json;
-  try {
-    json = JSON.parse(await file.text());
-  } catch (e) {
-    toast('Fila er ikke gyldig JSON');
-    return;
-  }
   let res;
   try {
-    res = detectImport(json);
+    res = detectImportText(await file.text());
   } catch (e) {
     toast(e.message);
     return;
@@ -781,11 +774,11 @@ async function importFile(file) {
     rebuildClassifier();
     toast('Backup gjenopprettet');
   } else {
-    const { receipts, added, updated } = mergeReceipts(state.receipts, res.data);
+    const { receipts, added, updated, duplicates } = mergeReceipts(state.receipts, res.data);
     state.receipts = receipts;
     await save.receipts();
     if (res.data.length) state.month = res.data.map((r) => r.date).sort().pop().slice(0, 7);
-    toast(`${res.kind === 'trumf' ? 'Trumf' : 'spending.json'}: ${added} nye${updated ? `, ${updated} oppdatert` : ''} kvitteringer`);
+    toast(`${{ trumf: 'Trumf', coop: 'Coop' }[res.kind] || 'spending.json'}: ${added} nye${updated ? `, ${updated} oppdatert` : ''} kvitteringer${duplicates ? ` (${duplicates} dobbelt fra flere kilder slått sammen)` : ''}`);
   }
   render();
 }

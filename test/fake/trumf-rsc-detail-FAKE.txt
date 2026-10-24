@@ -1,0 +1,2 @@
+0:["$","$L1",null,{"note":"FAKE TEST DATA (not a real receipt)"}]
+3:["$","section",null,{"children":["$","$L9",null,{"kvittering":{"butikk":"KIWI 412 TESTBYEN (FAKE)","varelinjer":[{"produktBeskrivelse":"TINE HELMELK 1L (FAKE)","ean":"2000000000015","antall":2,"enhetsType":"STK","belop":49.8},{"produktBeskrivelse":"BANANER (FAKE)","ean":"$undefined","antall":1.234,"enhetsType":"KG","belop":32.1},{"produktBeskrivelse":"KJELDSBERG KAFFE (FAKE)","ean":"2000000000022","antall":1,"enhetsType":"STK","belop":172.4}]}}]}]
