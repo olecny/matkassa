@@ -423,7 +423,7 @@ async function cloudTests() {
       await evaluate(`document.querySelector('#login-email').value = '${A_EMAIL}'; document.querySelector('#login-password').value = '${A_PW}'; document.querySelector('#login-form').requestSubmit(); return true;`);
       check(await waitFor(`document.querySelector('#dlg-merge').open`, 8000), 'cloud: first login with data on both sides asks how to merge');
       const mergeText = await evaluate(`return document.querySelector('#merge-text').textContent;`);
-      check(/kvitteringer/.test(mergeText) && /Kontoen har 1 kvitteringer og 1 varer/.test(mergeText), 'cloud: merge dialog shows the counts on both sides', mergeText);
+      check(/kvitteringer/.test(mergeText) && /Kontoen har 1 kvittering og 1 vare\./.test(mergeText), 'cloud: merge dialog shows the counts on both sides', mergeText);
       await shot('10-konto-sla-sammen');
       await evaluate(`document.querySelector('#dlg-merge button[value="merge"]').click(); return true;`);
       check(await waitFor(`/Synket med kontoen/.test(document.querySelector('#toast').textContent)`, 10000), 'cloud: merge + sync finishes');

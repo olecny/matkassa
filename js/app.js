@@ -962,7 +962,9 @@ function scheduleCloudSync(ms = 4000) {
 
 function askMerge(local, remote) {
   const dlg = $('#dlg-merge');
-  $('#merge-text').textContent = `Denne enheten har ${local.receipts} kvitteringer og ${local.list} varer i handlelisten. Kontoen har ${remote.receipts} kvitteringer og ${remote.list} varer.`;
+  const k = (n) => `${n} kvittering${n === 1 ? '' : 'er'}`;
+  const v = (n) => `${n} vare${n === 1 ? '' : 'r'}`;
+  $('#merge-text').textContent = `Denne enheten har ${k(local.receipts)} og ${v(local.list)} i handlelisten. Kontoen har ${k(remote.receipts)} og ${v(remote.list)}.`;
   dlg.returnValue = '';
   dlg.showModal();
   return new Promise((r) => dlg.addEventListener('close', () => r(dlg.returnValue || 'cancel'), { once: true }));
@@ -1074,9 +1076,9 @@ function accountCard() {
 }
 
 const CONNECT_HELP = {
-  trumf: 'Trumf kan ikke kobles til fra appen: innloggingen (BankID/SMS hos Trumf) må skje i en ekte nettleser hos Trumf, og de tilbyr ingen innlogging for andre apper. Slik gjør du det i stedet, én gang: på Mac-en, kjør «python3 ingest/trumf.py --login» og logg inn hos Trumf selv. Etter det hentes kvitteringene hver søndag.',
-  rema: 'REMA kan ikke kobles til fra appen: Æ-innloggingen er beskyttet (reCAPTCHA) og sender deg bare tilbake til REMAs egen app. Slik gjør du det i stedet, én gang: på Mac-en, kjør «rema1000 login» og logg inn selv. Etter det hentes kvitteringene hver søndag.',
-  coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila, importer den under Forbruk → Importer fil.',
+  trumf: 'Trumf kan ikke kobles til inne i appen: innloggingen (telefon, passord og SMS-kode) skjer bare på trumf.no, og Trumf har ingen innlogging for andre apper. Gjør det i stedet én gang på Mac-en: kjør «node ingest/trumf-login.mjs», logg inn hos Trumf i vinduet som åpnes, og lukk det. Deretter hentes kvitteringene hver søndag.',
+  rema: 'REMA kan ikke kobles til inne i appen: Æ-innloggingen er beskyttet med reCAPTCHA og sender deg bare tilbake til REMAs egen app, og det skal vi ikke omgå. Gjør det i stedet én gang på Mac-en: kjør «rema1000 login» og logg inn selv. Deretter hentes kvitteringene hver søndag.',
+  coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila (JSON eller CSV), importer den under Forbruk → Importer fil.',
 };
 
 async function accountAction(act, btn) {

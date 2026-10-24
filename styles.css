@@ -389,6 +389,7 @@ dialog label.check input { width: 22px; height: 22px; }
 @media (prefers-reduced-motion: reduce) { .home-card { transition: none; } .home-card:active { transform: none; } }
 
 /* Konto */
+#dlg-merge .dlg-actions { display: grid; grid-template-columns: 1fr; }
 .card h3.sub { font-size: .9rem; margin: 16px 0 6px; }
 .conns { list-style: none; margin: 0; padding: 0; }
 .conns li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--border); }
