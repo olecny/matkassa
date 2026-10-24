@@ -8,6 +8,7 @@ Skript som kjører på Mac-en (Jarvis-maskinen) og lager `spending.json`, som du
 |---|---|
 | `rema.py` | Testet mot en ekte konto (101 kvitteringer, varelinjesum = total). `--offers` henter REMAs Superpris-tilbud med strekkoder (GTIN). Endepunkter fra [rema1000-cli](https://github.com/Alfredvc/rema1000-cli) `API.md` |
 | `sync.sh` | Kjører `rema.py` og pusher til **ditt eget private** datarepo, som appen synker fra |
+| `launchd/` | Kjører `sync.sh` automatisk hver søndag kl. 20:00 (se under) |
 | Trumf | Trengs ikke på Mac: Trumf-innsyn (JSON) importeres direkte i appen |
 | Kvitteringsfoto/PDF | Fase 3: Claude Code tolker bilder til samme format |
 
@@ -116,6 +117,36 @@ og «Tilbud for deg» lærer bare av kvitteringene på brukerens egen telefon.
    (Mer → Synk fra Mac, sammen med repo-navnet). Appen henter fila når den åpnes, maks én gang i timen.
    Nøkkelen lagres bare på den enheten (ikke i backup). På iPhone har Safari og hjem-skjerm-appen hver sin lagring:
    lim den inn i appen du faktisk bruker.
+
+### Automatisk hver uke (launchd)
+
+`ingest/launchd/` gjør at Mac-en kjører `sync.sh` selv, **søndag kl. 20:00**:
+
+```bash
+ingest/launchd/install.sh             # installerer ~/Library/LaunchAgents/no.matkassa.weekly-sync.plist
+ingest/launchd/install.sh --run-now   # … og kjører én gang med en gang
+launchctl kickstart gui/$(id -u)/no.matkassa.weekly-sync   # kjør nå (når som helst)
+ingest/launchd/uninstall.sh           # fjern jobben (loggene beholdes)
+cat ingest/logs/last-run.txt          # status for siste kjøring
+```
+
+| Fil | Hva |
+|---|---|
+| `matkassa-weekly-sync.plist.template` | Mal med plassholdere (`__APP_DIR__`, `__PATH__`, tidspunkt). `install.sh` fyller inn og validerer med `plutil` |
+| `run-sync.sh` | Det launchd starter: kjører `sync.sh`, logger, skriver status, varsler ved feil |
+| `install.sh` / `uninstall.sh` | Installer/fjern for innlogget bruker (`launchctl bootstrap/bootout gui/<uid>`) |
+
+- **Logg:** `ingest/logs/sync.log` (git-ignorert, de siste 2 000 linjene). launchd selv skriver til `ingest/logs/launchd.log`.
+- **Status:** `ingest/logs/last-run.txt` med `status=OK` eller `status=FEIL`, start/slutt, exit-kode og siste linje fra synken.
+  Ved feil kommer også et macOS-varsel («Matkassa: ukentlig synk feilet»).
+- **PATH:** launchd starter jobber med en minimal PATH. `install.sh` finner `python3`, `git`, `brotli` og `gh` der de er
+  nå og skriver mappene inn i plist-en. Installerer du dem et annet sted, eller flytter mappen, kjør `install.sh` på nytt.
+- **Innlogging:** `git push` bruker macOS-nøkkelringen (osxkeychain), REMA-tokenet leses fra `~/.rema1000/tokens.json`.
+  Ingenting skrives ut: git kjører stille uten spørsmål (`GIT_TERMINAL_PROMPT=0`), og alt som ligner et token maskeres i loggen.
+- **Offentlig repo:** `sync.sh` nekter fortsatt å pushe hvis datarepoet er offentlig (da blir status `FEIL`).
+- **Sover eller av:** sover Mac-en søndag 20:00, kjører jobben når den våkner. Er den **slått av**, hoppes uka over til
+  neste søndag; kjør da `launchctl kickstart …` eller `ingest/launchd/run-sync.sh` for hånd.
+- REMA-innloggingen utløper av og til. Da feiler synken med en melding i status/varsel; kjør `rema auth login` på nytt.
 
 Ekte flerbruker uten Mac og GitHub (kontoer, Supabase med radnivåsikkerhet) er beskrevet som fase 7 i `plan.md`.
 

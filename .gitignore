@@ -16,3 +16,4 @@ innsyn/
 test/tmp/
 # Clearly fake test fixtures are the only JSON data allowed in git.
 !test/fake/*-FAKE.json
+ingest/logs/

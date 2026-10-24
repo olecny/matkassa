@@ -113,4 +113,11 @@ ok(mergeSettings({ ...defaultSettings(), geo: 'done' }, { chains: [] }).geo === 
 ok(/k\.startsWith\(PREFIX\) && k !== VERSION/.test(swSrc) && /const PREFIX = 'matkassa-v'/.test(swSrc), 'sw: only deletes its own caches (premium copy shares the origin)');
 ok(!'matkassa-premium-v1'.startsWith('matkassa-v') && !'matkassa-premium-img'.startsWith('matkassa-v'), 'sw: premium cache names fall outside this prefix');
 
+/* ---------- weekly sync (launchd) ---------- */
+const tpl = fs.readFileSync(new URL('../ingest/launchd/matkassa-weekly-sync.plist.template', import.meta.url), 'utf8');
+ok(/__APP_DIR__/.test(tpl) && /__PATH__/.test(tpl) && !/\/Users\//.test(tpl) && /StartCalendarInterval/.test(tpl), 'launchd: plist is a template with placeholders, no personal paths');
+const runSync = fs.readFileSync(new URL('../ingest/launchd/run-sync.sh', import.meta.url), 'utf8');
+ok(/GIT_TERMINAL_PROMPT=0/.test(runSync) && /last-run\.txt/.test(runSync) && /mask/.test(runSync), 'launchd: no git prompts, status file, token masking');
+ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('ingest/logs/'), 'launchd: logs are git-ignored');
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
