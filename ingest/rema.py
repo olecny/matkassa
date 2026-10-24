@@ -39,6 +39,16 @@ def load_env(path=os.path.join(HERE, ".env")):
                     k, v = line.split("=", 1)
                     env[k.strip()] = v.strip().strip('"').strip("'")
     env.update({k: v for k, v in os.environ.items() if k.startswith("REMA_")})
+    # Fall back to the token store written by `rema auth login` (rema1000-cli).
+    store = os.path.expanduser("~/.rema1000/tokens.json")
+    if not env.get("REMA_FIREBASE_REFRESH_TOKEN") and os.path.exists(store):
+        with open(store, encoding="utf-8") as f:
+            tokens = json.load(f)
+        fb = tokens.get("firebase") or {}
+        env["REMA_FIREBASE_REFRESH_TOKEN"] = fb.get("refresh_token", "")
+        env.setdefault("REMA_DEVICE_ID", tokens.get("device_id") or "")
+        if fb.get("phone_number"):
+            env.setdefault("REMA_PHONE", fb["phone_number"])
     return env
 
 

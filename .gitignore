@@ -11,3 +11,4 @@ test/fixtures/
 node_modules/
 .DS_Store
 __pycache__/
+innsyn/
