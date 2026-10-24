@@ -317,3 +317,8 @@ dialog label.check input { width: 22px; height: 22px; }
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; z-index: 30;
   max-width: calc(100% - 32px); font-size: .9rem; box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
 }
+.field { display: grid; gap: 4px; margin-bottom: 8px; font-size: .85rem; color: var(--text-2); font-weight: 600; }
+.field input {
+  min-height: 44px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); padding: 0 12px; font-size: 16px; font-weight: 400; min-width: 0;
+}

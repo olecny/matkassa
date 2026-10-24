@@ -1,6 +1,6 @@
 // Matkassa service worker: precache the app shell, cache offer images.
 // Offer data itself is stored by the app in IndexedDB, so offers work offline too.
-const VERSION = 'matkassa-v1';
+const VERSION = 'matkassa-v2';
 const SHELL = [
   './',
   'index.html',

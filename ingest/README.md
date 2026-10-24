@@ -95,3 +95,10 @@ Appen godtar også en ren liste med kvitteringer.
 **Kategorimotoren i appen:** `lines[].category` → EAN-regel → tekstregel (lengste først) → innebygd
 nøkkelordkart på varenavnet → nøkkelordkart på `group` → *Ukategorisert*. Differanse over 1 kr mellom
 `total` og summen av linjene havner i *Ukategorisert*.
+
+## Synk til appen (`sync.sh`)
+
+`ingest/sync.sh` kjører `rema.py` og pusher `spending.json` til det **private** repoet `olecny/matkassa-data`
+(klonet i `data/`, git-ignorert her). Appen henter fila derfra med en GitHub-nøkkel med kun lesetilgang
+(Mer → Synk fra Mac), når den åpnes og maks én gang i timen. Nøkkelen lagres bare på telefonen.
+Senere, for flere brukere: bytt til ekte innlogging (f.eks. Supabase) i stedet for én nøkkel per bruker.

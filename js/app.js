@@ -3,7 +3,7 @@ import { fetchOffers, TRONDHEIM } from './tjek.js';
 import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categories.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 
@@ -26,7 +26,7 @@ const state = {
   categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
   rules: [],
   receipts: [],
-  settings: { chains: [] },
+  settings: { chains: [], sync: { repo: 'olecny/matkassa-data', path: 'spending.json', token: '', lastSync: null, lastError: null } },
   q: '',
   sort: 'relevans',
   cat: null,
@@ -584,7 +584,7 @@ async function importFile(file) {
     state.rules = Array.isArray(b.rules) ? b.rules : [];
     state.receipts = Array.isArray(b.receipts) ? b.receipts : [];
     state.list = Array.isArray(b.list) ? b.list : [];
-    if (b.settings) state.settings = { ...state.settings, ...b.settings };
+    if (b.settings) state.settings = { ...state.settings, ...b.settings, sync: { ...state.settings.sync, ...(b.settings.sync || {}), token: state.settings.sync.token } };
     await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
     rebuildClassifier();
     toast('Backup gjenopprettet');
@@ -598,7 +598,49 @@ async function importFile(file) {
   render();
 }
 
+/* ---------- sync from a private GitHub repo (written by ingest/ on the Mac) ---------- */
+const SYNC_EVERY_MS = 60 * 60 * 1000;
+let syncing = false;
+
+async function syncSpending({ quiet = false } = {}) {
+  const s = state.settings.sync;
+  if (!s || !s.token || !s.repo || syncing || !navigator.onLine) return;
+  syncing = true;
+  try {
+    const path = s.path.split('/').map(encodeURIComponent).join('/');
+    const res = await fetch(`https://api.github.com/repos/${s.repo}/contents/${path}`, {
+      headers: { Authorization: `Bearer ${s.token}`, Accept: 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (res.status === 401 || res.status === 403) throw new Error('Nøkkelen ble avvist (utløpt eller mangler lesetilgang)');
+    if (res.status === 404) throw new Error(`Fant ikke ${s.path} i ${s.repo}`);
+    if (!res.ok) throw new Error(`GitHub svarte ${res.status}`);
+    const { kind, data } = detectImport(await res.json());
+    if (kind === 'backup') throw new Error('Synkfila er en backup, ikke kvitteringer');
+    const { receipts, added } = mergeReceipts(state.receipts, data);
+    state.receipts = receipts;
+    s.lastSync = Date.now();
+    s.lastError = null;
+    await Promise.all([save.receipts(), save.settings()]);
+    if (added && data.length) state.month = data.map((r) => r.date).sort().pop().slice(0, 7);
+    if (!quiet || added) toast(added ? `Synk: ${added} nye kvitteringer` : 'Synk: ingen nye kvitteringer');
+  } catch (e) {
+    s.lastError = e.message;
+    save.settings();
+    if (!quiet) toast('Synk feilet: ' + e.message);
+  } finally {
+    syncing = false;
+    render();
+  }
+}
+
+const syncDue = () => {
+  const s = state.settings.sync;
+  return s && s.token && (!s.lastSync || Date.now() - s.lastSync > SYNC_EVERY_MS);
+};
+
 function exportBackup() {
+  const { token, ...sync } = state.settings.sync || {};
   const data = {
     schema: BACKUP_SCHEMA,
     app: 'Matkassa ' + APP_VERSION,
@@ -607,7 +649,7 @@ function exportBackup() {
     rules: state.rules,
     receipts: state.receipts,
     list: state.list,
-    settings: state.settings,
+    settings: { ...state.settings, sync }, // never put the GitHub key in a backup file
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const name = `matkassa-backup-${todayISO()}.json`;
@@ -629,6 +671,21 @@ function renderMore() {
   const rules = [...state.rules].sort((a, b) => (b.created || 0) - (a.created || 0));
   const d = state.offersData;
   $('#more-body').innerHTML = `
+    <div class="card"><h2>Synk fra Mac</h2>
+      <p class="hint" style="margin-top:0">Kvitteringene hentes fra et privat GitHub-repo som Mac-en oppdaterer. Nøkkelen lagres bare på denne enheten og tas aldri med i backup.</p>
+      <form id="sync-form">
+        <label class="field"><span>Repo</span><input id="sync-repo" value="${esc(state.settings.sync.repo)}" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>GitHub-nøkkel (kun lesetilgang)</span><input id="sync-token" type="password" placeholder="${state.settings.sync.token ? 'Lagret – lim inn for å bytte' : 'github_pat_…'}" autocomplete="off"></label>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn" type="submit">${state.settings.sync.token ? 'Synk nå' : 'Lagre og synk'}</button>
+          ${state.settings.sync.token ? '<button class="btn btn-ghost" type="button" data-action="sync-forget">Glem nøkkel</button>' : ''}
+        </div>
+      </form>
+      <dl class="kv">
+        <dt>Sist synket</dt><dd>${state.settings.sync.lastSync ? timeFmt.format(state.settings.sync.lastSync) : 'aldri'}</dd>
+        ${state.settings.sync.lastError ? `<dt>Feil</dt><dd>${esc(state.settings.sync.lastError)}</dd>` : ''}
+      </dl>
+    </div>
     <div class="card"><h2>Kategorier</h2>
       <div id="cat-list">${state.categories.map((c) => `<div class="cat-row">
         <input type="color" value="${esc(c.color)}" data-catcolor="${esc(c.id)}" aria-label="Farge for ${esc(c.name)}">
@@ -749,6 +806,11 @@ function bind() {
     if (act === 'import') $('#file-input').click();
     if (act === 'manual') openReceiptDialog();
     if (act === 'export') exportBackup();
+    if (act === 'sync-forget') {
+      Object.assign(state.settings.sync, { token: '', lastError: null });
+      save.settings();
+      renderMore();
+    }
     if (act === 'wipe-spending' && confirm('Slette alle kvitteringer på denne enheten? Kategorier og regler beholdes. Ta gjerne backup først.')) {
       state.receipts = [];
       save.receipts();
@@ -835,7 +897,18 @@ function bind() {
       save.rules(); rebuildClassifier(); renderMore();
     }
   });
-  $('#view-mer').addEventListener('submit', (e) => {
+  $('#view-mer').addEventListener('submit', async (e) => {
+    if (e.target.id === 'sync-form') {
+      e.preventDefault();
+      const s = state.settings.sync;
+      s.repo = $('#sync-repo').value.trim() || s.repo;
+      const token = $('#sync-token').value.trim();
+      if (token) s.token = token;
+      await save.settings();
+      if (!s.token) { toast('Lim inn en GitHub-nøkkel først'); return; }
+      syncSpending();
+      return;
+    }
     if (e.target.id !== 'cat-add') return;
     e.preventDefault();
     const name = $('#cat-new').value.trim();
@@ -847,7 +920,11 @@ function bind() {
 
   window.addEventListener('online', () => { state.error = null; loadOffers(); });
   window.addEventListener('offline', () => { state.error = 'Frakoblet'; renderStatus(); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadOffers(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    loadOffers();
+    if (syncDue()) syncSpending({ quiet: true });
+  });
 }
 
 /* ---------- start ---------- */
@@ -862,7 +939,7 @@ async function start() {
     if (categories && categories.length) state.categories = categories;
     if (rules) state.rules = rules;
     if (receipts) state.receipts = receipts;
-    if (settings) state.settings = { ...state.settings, ...settings };
+    if (settings) state.settings = { ...state.settings, ...settings, sync: { ...state.settings.sync, ...(settings.sync || {}) } };
   } catch (e) {
     console.error('Lagring utilgjengelig', e);
     state.error = 'Lagring er ikke tilgjengelig i denne nettleseren';
@@ -872,6 +949,7 @@ async function start() {
   showTab(['tilbud', 'liste', 'forbruk', 'mer'].includes(hash) ? hash : 'tilbud');
   db.persist().then((p) => (state.persisted = p));
   loadOffers();
+  if (syncDue()) syncSpending({ quiet: true });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
   }
