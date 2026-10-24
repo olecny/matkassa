@@ -63,6 +63,12 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 9. **Ukentlig synk:** ja. launchd på Mac-en kjører `ingest/sync.sh` søndag kl. 20:00 (kvitteringer + REMA-tilbud til det private datarepoet).
 10. **Premium-kopi:** ja. Egen app med samme funksjoner og mer premium utseende etter emilkowal.ski-skillene, på olecny.github.io/matkassa-premium, for sammenligning. Egen lagring (isolert), med enveis kopi fra Matkassa.
 
+**Besluttet av Ole (2026-10-24, runde 2), bygget av David 2026-10-25:**
+11. **Hjem** som første fane i begge appene (forbruk denne måneden mot samme tid forrige måned, toppkategorier, trend; åpne varer med tilbudsmerke; «Tilbud for deg»).
+12. **Konto med Supabase (gratis), lokal-først.** Appen virker uten konto; «Logg inn» vises bare når `js/cloud-config.js` er fylt ut. Tabeller per element med RLS `user_id = auth.uid()`. Første innlogging: *Slå sammen* (standard) eller *Bruk kontoens data*. På samme element vinner enheten som endret det sist før synk. GitHub-nøkkelen legges **ikke** i Supabase (databasen avviser det). Ole lager prosjektet selv (SUPABASE.md).
+13. **«Koble til» kjeder:** ikke mulig rent i en PWA (REMA: reCAPTCHA + låst retur-URL; Trumf: innlogging bare på trumf.no; Coop: ingen dokumentert vei). Valgt: Ole logger inn selv én gang per kjede **på Mac-en**; Mac-en (eller serveren, via Vault-krypterte økter og en ukentlig Edge Function) henter etterpå. Coop bare via innsyn. GitHub/Mac-veien beholdes som reserve.
+14. **Åpning for andre:** ikke nå. Kun Ole og testere til Ole har tatt stilling til vilkår (ToS), GDPR (behandlingsansvar, PERSONVERN.md) og sikkerhet (SUPABASE.md → Risiko og juss).
+
 **Antatt (kan endres når som helst):**
 - Appnavn: «Matkassa» (arbeidsnavn). UI på norsk (bokmål), lys og mørk modus.
 - Standardkategorier: Meieri, Kjøtt/fisk, Frukt/grønt, Brød/bakst, Tørrvarer, Snacks/godteri, Drikke, Frossen, Husholdning, Annet.
@@ -144,16 +150,19 @@ Telefon (PWA, norsk, offline)              Mac (Jarvis-maskinen)
 - [x] (Maria) Uavhengig testrapport *(PASS, 1 major + 4 minor, alle rettet i 0.4.1)*
 - [ ] (Ole) «strekkode»-treff sett på telefonen etter `ingest/sync.sh`
 
-### Fase 7 (senere): Ekte flerbruker · **Hvem:** David
+### Fase 7: Ekte flerbruker · **Hvem:** David · *grunnmur bygget 2026-10-25 (0.6.0), venter på Oles Supabase-prosjekt*
 I dag er appen «per bruker» ved at alt ligger på brukerens egen enhet: profilen («Tilbud for deg») bygges bare av kvitteringene i den enhetens IndexedDB, og hver bruker har sin egen REMA-innlogging, sitt eget private datarepo og sin egen lesenøkkel. Det skalerer ikke til folk uten Mac/GitHub. Veien videre, når det trengs:
-- [ ] **Innlogging:** Supabase gratisnivå (Auth med e-postlenke / Sign in with Apple), ingen passord i appen
-- [ ] **Data per bruker:** tabeller `receipts`, `lines`, `rules`, `categories`, `list`, `profile` med `user_id`; **Row Level Security** (`user_id = auth.uid()`) på alle, så ingen kan lese andres data selv med anon-nøkkelen
+- [x] **Innlogging:** Supabase gratisnivå, e-post + passord og innloggingslenke (`js/cloud.js`, uten bibliotek). *Sign in with Apple: senere*
+- [x] **Data per bruker:** `receipts`, `list_items`, `categories`, `rules`, `settings` (+ `chain_connections`) med `user_id` og **RLS** på alle (`supabase/migrations/`), testet på lokal Postgres (`test/rls.sh`)
 - [ ] **Profil per bruker:** bygges fortsatt i klienten fra brukerens egne kvitteringer (ingen deling mellom brukere); eventuelt lagret i `profile` for raskere oppstart
-- [ ] **Kvitteringskilder:** Trumf-/REMA-innhenting kan ikke kjøre i nettleseren (tokens); enten fortsatt Mac-skript per bruker som skriver til Supabase med brukerens egen nøkkel, eller en Edge Function der brukeren selv legger inn sitt token (kryptert). Vurder vilkår og personvern før dette
+- [x] **Kvitteringskilder:** Mac-skript per bruker skriver til Supabase med brukerens egen innlogging (`ingest/cloud.py`); Edge Functions `connect` + `fetch-receipts` med økter kryptert i Vault og ukentlig pg_cron *(skrevet og testet med falske tjenester, ikke kjørt på ekte Supabase)*
 - [ ] **Tilbud med EAN:** felles, ikke-personlig tilbudstabell (Tjek + REMA Superpris) som en planlagt jobb fyller; ev. Kassalapp-oppslag EAN → navn med nøkkel bare på serveren
-- [ ] **Personvern:** databehandleroversikt, eksport/sletting av egen konto, ingen kvitteringsdata i logger
-- [ ] Migrering: «Last opp fra denne enheten» flytter IndexedDB-data til kontoen
-**Gate 7:** to testbrukere ser bare sine egne data (RLS-test), og Ole har godkjent kostnad (skal være 0 kr) og vilkår.
+- [x] **Personvern:** sletting i appen + kaskade ved sletting av bruker (testet), PERSONVERN.md (utkast), ingen kvitteringsdata eller tokens i logger. *Databehandleravtale: Ole i Supabase-dashboardet*
+- [x] Migrering: første innlogging slår sammen enhetens data med kontoen
+**Gate 7:**
+- [x] To testbrukere ser bare sine egne data (RLS-test på lokal Postgres, 11 sjekker)
+- [ ] (Ole) Supabase-prosjekt laget og `js/cloud-config.js` fylt ut (SUPABASE.md)
+- [ ] (Ole) Godkjent kostnad (0 kr) og vilkår før andre enn testere får konto
 
 ## Risikoer
 - **Uoffisielle API-er (Tjek, REMA, Trumf) brekker eller bryter vilkår** → én adapter per kilde, sjeldne kall, bare egen data, og kvitteringstolking som reserve.
@@ -164,6 +173,7 @@ I dag er appen «per bruker» ved at alt ligger på brukerens egen enhet: profil
 
 ## Ikke verifisert ennå
 Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og Coop, Tjeks vilkår og om REMA-, Trumf- eller Coop-appene har en offisiell kvitteringseksport.
+Fra 0.6.0: `trumf.py` mot ekte trumf.no (feltnavn fra åpne prosjekter, paginering ukjent), Coop-innsynsformatet (importen er gjettet), Supabase-migrasjonene og Edge Functions på et ekte prosjekt (RLS bare testet på lokal Postgres med en Supabase-stand-in), Vault-tilgangen for `postgres`-rollen i Supabase.
 
 ## Logg
 | Tid | Fase | Hva skjedde |
@@ -174,3 +184,4 @@ Dagens innsynsprosess hos Trumf (gammel URL gir 404), innsynsformat hos REMA og 
 | 2026-10-24 | 6 | David: gjennomgang av Jarvis' tillegg (synk, service worker, skjul kjeder, læring) og rettinger. Strekkode-research: Tjek har ingen EAN (0/1 097), REMA Superpris 16/16 med GTIN → flettet inn, 13 av 1 099 tilbud ≈ 1,2 % har EAN denne uken. EAN-først matching, kategorisperre, per-bruker-oppsett (tomt synk-repo, område, `sync.sh` med eget repo + sperre mot offentlige repoer). Ny testagent Maria, `test/e2e.mjs` (51/51 falsk, 43/43 + 8 hoppet over live), 39/39 enhetstester, personvernsjekk grønn. Rettet: service worker hang på svakt nett (nå 3 s cache-fallback), synk prøvde på nytt ved hver app-veksling etter feil, «Tilbud for deg» ignorerte kjedefilter, repo-feltet kunne ikke tømmes, små knapper < 44 px |
 | 2026-10-24 | 6 | Maria testet 0.4.0: PASS, 1 major + 4 minor. David rettet i 0.4.1: service worker åpnet på ~9 s ved svakt nett (3 s per nivå i lastekjeden) → etter én treg forespørsel serveres resten fra cache, målt 3,3 s; vannrett rulling på 320 px; tom-tilstand når alle kjeder er skjult (peker til Mer → Kjeder); tilbudskoblet handlelistevare viste skjult kjede; backup-gjenoppretting kan ikke lenger endre synk-repo, og ødelagte innstillinger (område uten koordinater) renses (`js/settings.js`). Tester: enhet 47/47, e2e 61/61 (falsk) og 53/53 + 8 hoppet over (live), personvern 8/8 |
 | 2026-10-24 | 6 | David, 0.5.0: posisjon ved første start (spør én gang, avrundet ~1 km, fallback Trondheim, kort «Finn tilbud nær deg» når iOS trenger et trykk, eksisterende område beholdes; omlasting under henting settes i kø). Ukentlig synk: launchd-agent `no.matkassa.weekly-sync` søndag 20:00 (`ingest/launchd/`, logg + `last-run.txt` + macOS-varsel ved feil, tokens maskeres); kickstart-test: OK, 101 kvitteringer + 16 strekkodetilbud pushet. Service worker sletter bare egne cacher (delt opprinnelse). Matkassa Premium bygget og deployet (`../matkassa-premium/`, egen IndexedDB og cacher, enveis kopi uten token, DESIGN.md). Tester Matkassa: enhet 56/56, e2e 89/89 (falsk) og 81/81 + 8 hoppet over (live), personvern 8/8. Premium: enhet 75/75, e2e 109/109 og 101/101 + 8 hoppet over, personvern 8/8 |
+| 2026-10-25 | 6–7 | David, 0.6.0 (Premium 0.6.0-premium.1). Marias funn: 16 px sorteringsvalg (ingen iOS-zoom) + test for alle felt ≥ 16 px; Premium: slipphastighet over siste ~100 ms og 0 hvis siste bevegelse > 80 ms før slipp (10/10 kjøringer grønne), FLIP-gli ved avkrysning, 320 px/150 % tekst (bryting, faste knapper i arket). **Hjem**-fane i begge. **Konto** (Supabase, lokal-først, synk begge veier, sammenslåing ved første innlogging) med RLS testet lokalt; Edge Functions + Vault + pg_cron skrevet (ikke kjørt på ekte Supabase). **Trumf** fra Mac-en (`trumf-login.mjs` + `trumf.py`, testet mot falsk trumf.no), **Coop** bare via innsyn (CSV/JSON-import, gjettet format), samme kjøp fra to kilder slås sammen. `sync.sh` leverer til konto og/eller privat repo. Ingen kontoer laget, ingen innlogging på Oles vegne. |

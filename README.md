@@ -7,6 +7,9 @@ Norsk PWA for iPhone: **ukens mattilbud**, **handleliste** som sier fra når en 
 (`../matkassa-premium/`, samme funksjoner, mer «premium» utseende og bevegelse, egen lagring)
 
 ## Bruk
+- **Hjem** (første fane): hva du har brukt på mat denne måneden mot samme tid forrige måned, de største kategoriene og
+  en liten trend for 6 måneder (trykk → Forbruk), opptil 4 varer fra handlelisten med tilbudsmerke (trykk →
+  Handleliste) og en rad «Tilbud for deg» når appen har lært noe. Nye brukere får tomme tilstander med hva de kan gjøre.
 - **Installer:** åpne lenken i Safari → Del → *Legg til på Hjem-skjerm*.
 - **Område:** første gang appen åpnes uten valgt område, spør den om posisjonen én gang (avrundet til ca. 1 km, lagres
   bare på enheten). Sier du nei, eller den feiler, brukes Trondheim. Svarer ikke telefonen uten et trykk (iOS), vises
@@ -17,10 +20,16 @@ Norsk PWA for iPhone: **ukens mattilbud**, **handleliste** som sier fra når en 
   Tilbudene lagres på telefonen og vises også uten nett. Oppdateres automatisk når de er over 6 timer gamle, eller med ↻.
 - **Handleliste:** legg til, kryss av, slett. Hver vare får «På tilbud hos KIWI – 19,90 kr» hvis noe matcher denne uken (trykk for flere).
   Virker offline.
-- **Forbruk:** *Importer fil* (Trumf-innsyn JSON, `spending.json`, Matkassa-backup) eller *Ny kvittering* for hånd.
+- **Forbruk:** *Importer fil* (Trumf-innsyn JSON, Coop-innsyn CSV/JSON, `spending.json`, Matkassa-backup) eller *Ny kvittering* for hånd.
   Viser måned, per kategori, siste 12 måneder, en kø med ukategoriserte varer (velg kategori → ny regel) og kvitteringene.
 - **Ukentlig synk:** Mac-en kjører `ingest/sync.sh` hver søndag kl. 20:00 via launchd (kvitteringer + REMA-tilbud til
   det private datarepoet). Status: `cat ingest/logs/last-run.txt`. Se [ingest/README.md](ingest/README.md#automatisk-hver-uke-launchd).
+- **Konto (valgfritt):** vises i Mer bare når `js/cloud-config.js` har et Supabase-prosjekt. Logg inn med e-post og
+  passord (eller innloggingslenke), så synkes kvitteringer, handleliste, kategorier og regler begge veier mellom
+  enhetene dine. Appen virker fullt uten konto. Første innlogging spør om du vil slå sammen eller bruke kontoens data.
+  Oppsett for Ole: [SUPABASE.md](SUPABASE.md). Personvern: [PERSONVERN.md](PERSONVERN.md) (utkast).
+- **Kjeder:** REMA og Trumf kobles til **fra Mac-en** (du logger inn selv), Coop via innsyn. Hvorfor ikke rett i appen:
+  se [SUPABASE.md](SUPABASE.md#hvorfor-ikke-koble-til-rematrumf-rett-i-appen).
 - **Mer:** synk fra ditt eget private repo (valgfritt, se [ingest/README.md](ingest/README.md)), område, skjul kjeder, rediger kategorier (navn, farge, legg til, slett), se/slett regler, eksporter/importer backup.
 
 Alle data ligger i IndexedDB på enheten (`navigator.storage.persist()` blir forespurt). Ta backup jevnlig;
@@ -33,6 +42,10 @@ node test/unit.test.mjs          # enhetstester (import, summer, profil, EAN, fl
 node test/e2e.mjs                # headless Chrome 390×844 over CDP, falskt nett fra test/fake/ → test/tmp/e2e-report.md
 node test/e2e.mjs --live         # samme mot ekte Tjek-tilbud (bare lesing)
 test/privacy.sh                  # ingen tokens/persondata i det offentlige repoet
+test/rls.sh                      # Supabase-schema + RLS på en midlertidig lokal Postgres (brew install postgresql@17)
+python3 test/ingest.test.py      # trumf.py, merge.py, cloud.py og sync.sh mot falsk trumf.no + falsk Supabase
+node test/trumf-login.test.mjs   # trumf-login.mjs mot en falsk innloggingsside (headless)
+node test/functions.test.mjs     # Edge Functions under Node med falske tjenester
 ```
 Testagenten **Maria** (`project-jarvis/.claude/agents/maria.md`) kjører disse og skriver en PASS/FAIL-rapport.
 All testdata i `test/fake/` er oppdiktet og merket `FAKE`.
@@ -48,10 +61,12 @@ Ingen byggesteg, ingen avhengigheter: vanilla HTML/CSS/JS-moduler.
 | `js/settings.js` | Innstillinger: standardverdier og validering (backup kan ikke endre synk-repo/nøkkel) |
 | `js/extra-offers.js` | Tilbud med strekkode (REMA Superpris fra datarepoet) flettet inn i Tjek-tilbudene |
 | `js/categories.js` | Standardkategorier, norsk nøkkelordkart, regelmotor |
-| `js/spending.js` | Import (Trumf / spending.json / backup), sammenslåing, fordeling per kategori |
+| `js/spending.js` | Import (Trumf / Coop / spending.json / backup), sammenslåing og fjerning av samme kjøp fra to kilder, fordeling per kategori, måned mot måned (Hjem) |
+| `js/cloud.js`, `js/cloud-config.js` | Valgfri konto: Supabase-klient uten bibliotek (innlogging, synk begge veier, `reconcile`) og offentlig prosjektoppsett |
+| `supabase/` | Migrasjoner (tabeller + RLS, kjedeøkter i Vault), Edge Functions (`connect`, `fetch-receipts`), ukentlig pg_cron, RLS-test |
 | `js/db.js` | Liten IndexedDB-nøkkel/verdi-lagring |
 | `sw.js`, `manifest.webmanifest`, `icons/` | PWA: app-skall og tilbudsbilder caches |
-| `ingest/` | Mac-side: `rema.py`, `sync.sh`, `launchd/` (ukentlig jobb) og formatene `spending.json` / `rema-offers.json` ([ingest/README.md](ingest/README.md)) |
+| `ingest/` | Mac-side: `rema.py`, `trumf-login.mjs` + `trumf.py`, `merge.py`, `cloud.py`, `sync.sh`, `launchd/` (ukentlig jobb) og formatene `spending.json` / `rema-offers.json` ([ingest/README.md](ingest/README.md)) |
 | `test/` | `unit.test.mjs`, `e2e.mjs`, `privacy.sh`, `fake/*-FAKE.json` (oppdiktet testdata). `test/tmp/` er git-ignorert |
 
 ## Datakilder og forbehold
@@ -67,9 +82,10 @@ Matkassa Premium deler opprinnelsen `olecny.github.io` (den bruker `matkassa-pre
 og etter én treg forespørsel serveres resten av lastingen fra cache (svakt nett i butikken).
 
 ## Status
-0.5.0: fase 1–2 og 6 (strekkode, per bruker, testagent), posisjon ved første start og ukentlig synk er bygget og testet
-headless (enhet, e2e falsk + live med falsk posisjon via CDP, personvern).
-REMA-kvitteringer er koblet til via `ingest/`. Venter på: test på Oles iPhone. Ekte flerbruker (kontoer) er fase 7. Se `plan.md`.
+0.6.0: Hjem-fane, valgfri konto med synk (Supabase, testet mot falsk backend + RLS på lokal Postgres), Trumf-kvitteringer
+fra Mac-en (testet mot falsk trumf.no), Coop-innsyn-import (gjettet format), fjerning av samme kjøp fra to kilder.
+REMA-kvitteringer er koblet til via `ingest/` (ekte konto). Venter på: Oles Supabase-prosjekt (SUPABASE.md), Oles første
+Trumf-innlogging, test på Oles iPhone. Se `plan.md`.
 
 ## Tilbud for deg (læring, per bruker)
 `js/profile.js` bygger en profil av **kvitteringene på denne enheten**, altså bare brukerens egne kjøp: hvert produkt

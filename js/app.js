@@ -7,7 +7,7 @@ import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];

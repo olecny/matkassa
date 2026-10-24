@@ -7,9 +7,14 @@ Skript som kjører på Mac-en (Jarvis-maskinen) og lager `spending.json`, som du
 | Skript | Status |
 |---|---|
 | `rema.py` | Testet mot en ekte konto (101 kvitteringer, varelinjesum = total). `--offers` henter REMAs Superpris-tilbud med strekkoder (GTIN). Endepunkter fra [rema1000-cli](https://github.com/Alfredvc/rema1000-cli) `API.md` |
-| `sync.sh` | Kjører `rema.py` og pusher til **ditt eget private** datarepo, som appen synker fra |
+| `trumf-login.mjs` | Du logger inn selv på trumf.no i et vanlig Chrome-vindu; lagrer bare trumf.no-økta i `~/.matkassa/trumf_state.json` (0600). Testet mot en falsk side, **ikke mot ekte trumf.no** (krever Oles innlogging) |
+| `trumf.py` | Trumf-kvitteringer (Kiwi, Meny, Spar, Joker) med varelinjer og strekkoder → `spending.json`, kilde `trumf`. Testet mot falsk trumf.no (FAKE RSC-svar); **ikke mot ekte data ennå** |
+| `merge.py` | Slår sammen REMA + Trumf (+ evt. flere) og fjerner samme kjøp fra to kilder |
+| `cloud.py` | Mac → **din Matkassa-konto** (Supabase): `login`, `upload`, `connect trumf|rema`, `status`. Se [SUPABASE.md](../SUPABASE.md) |
+| `sync.sh` | Henter fra REMA og/eller Trumf (det du har logget inn på), slår sammen, og leverer til kontoen din og/eller **ditt eget private** datarepo |
 | `launchd/` | Kjører `sync.sh` automatisk hver søndag kl. 20:00 (se under) |
-| Trumf | Trengs ikke på Mac: Trumf-innsyn (JSON) importeres direkte i appen |
+| Trumf-innsyn | Kan fortsatt importeres direkte i appen (JSON); dobbelt med `trumf.py` slås sammen |
+| Coop | **Ingen dokumentert API** for egne kvitteringer, så ingen skraper (vi dekoder ikke Coop-appens trafikk). Bestill innsyn: coop.no → Min side → *Bestill innsyn*, og importer CSV/JSON i appen. Formatet er gjettet (FAKE-eksempler i `test/fake/`) og må sjekkes på første ekte fil |
 | Kvitteringsfoto/PDF | Fase 3: Claude Code tolker bilder til samme format |
 
 ## REMA (`rema.py`)
@@ -42,6 +47,29 @@ Endepunkter (base `https://api.rema.no`, header `Ocp-Apim-Subscription-Key` + `A
 | `GET /v1/bella/transaction/v2/rows/{id}` | Varelinjer: `productDescription`, `prodtxt3` (GTIN), `productGroupDescription` (REMAs varegruppe), `amount`, `discount`, `deposit`, `pieces`, `volume`, `unit` |
 
 Dette er et **uoffisielt** API mot din egen konto. Det kan endres uten varsel. Kjør sjelden (f.eks. én gang i uka).
+
+## Trumf (`trumf-login.mjs` + `trumf.py`)
+
+Bare Node 22+ og Python-standardbiblioteket; Google Chrome må være installert.
+
+```bash
+node ingest/trumf-login.mjs                  # 1. Chrome åpnes på trumf.no: logg inn SELV (telefon, passord, SMS-kode)
+python3 ingest/trumf.py --check              # 2. «Trumf-økta virker.»
+python3 ingest/trumf.py --out spending-trumf.json [--since 2026-01-01]
+```
+- **Slik virker det:** `trumf.py` leser de samme sidene som trumf.no viser deg under *Mine kvitteringer*
+  (`/trumf-profil/kvitteringer`, React Server Component-svar med `RSC: 1`): transaksjoner (`batchId`, `belop`,
+  `beskrivelse`, `transaksjonsTidspunkt`, `harKvittering`) og per kvittering `varelinjer` (`produktBeskrivelse`, `ean`,
+  `antall`, `enhetsType`, `belop`). Kjeden tas fra kvitteringen (Kiwi/Meny/Spar/Joker …). Bonus-/partnerkjøp uten
+  kvittering (bensin o.l.) hoppes over.
+- **Skånsomt:** maks én side i sekundet, nye kjøp hentes bare én gang (tidligere kvitteringer gjenbrukes),
+  nye forsøk ved 429/5xx/nettfeil.
+- **Økta:** trumf.no fornyer innloggingen underveis; skriptet lagrer de nye informasjonskapslene (0600). Når den er
+  utløpt, avslutter det med kode 2 og ber deg kjøre `trumf-login.mjs` igjen. Verdier skrives aldri ut.
+- **Kilder (bare lest, ingen kode kopiert):** holdude/TrumfScraper, palhatlem/grocious, ttyridal/trumf-data-fetch,
+  olejorgenb/trumf_receipt_tools.
+- **Ikke verifisert:** sidene er uoffisielle. Feltnavnene er hentet fra åpne prosjekter fra 2026; om listen pagineres
+  (bare siste måneder?) vet vi først etter Oles første ekte kjøring.
 
 ## `spending.json` – felles kvitteringsformat (`matkassa.spending/1`)
 
@@ -103,7 +131,17 @@ Appen godtar også en ren liste med kvitteringer.
 nøkkelordkart på varenavnet → nøkkelordkart på `group` → *Ukategorisert*. Differanse over 1 kr mellom
 `total` og summen av linjene havner i *Ukategorisert*.
 
-## Synk til appen (`sync.sh`) – for hvem som helst
+## Synk til appen (`sync.sh`)
+
+`sync.sh` henter fra kildene du har logget inn på (REMA: `~/.rema1000/tokens.json`, Trumf: `~/.matkassa/trumf_state.json`),
+slår dem sammen med `merge.py`, og leverer til:
+- **Matkassa-kontoen din** (anbefalt, ingen GitHub-nøkkel): kjør `python3 ingest/cloud.py login` én gang. Se [SUPABASE.md](../SUPABASE.md).
+- **og/eller ditt private datarepo** (den eldre veien, under), hvis `MATKASSA_DATA_REPO` er satt.
+
+En kilde som feiler (f.eks. utløpt Trumf-innlogging) stopper ikke de andre, men jobben ender med feil (kode 3) og et
+macOS-varsel med hva du må gjøre.
+
+### Den eldre veien: privat GitHub-repo – for hvem som helst
 
 Hver bruker har sin egen innlogging, sitt eget private repo og sin egen nøkkel. Ingenting deles mellom brukere,
 og «Tilbud for deg» lærer bare av kvitteringene på brukerens egen telefon.
