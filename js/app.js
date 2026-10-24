@@ -6,7 +6,7 @@ import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, mergeReceipts, summarize, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 
-const APP_VERSION = '0.4.1';
+const APP_VERSION = '0.5.0';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 
@@ -188,10 +188,12 @@ function renderStatus() {
 }
 
 /* ---------- offers ---------- */
+let reloadQueued = false; // a forced reload asked for while a fetch was running (e.g. the location arrived)
 async function loadOffers(force = false) {
-  if (state.loading) return;
+  if (state.loading) { if (force) reloadQueued = true; return; }
   const d = state.offersData;
-  if (!force && d && Date.now() - d.fetchedAt < STALE_MS && d.area === area().name) return;
+  const a = area(); // the area this fetch is for, even if the user changes it while it runs
+  if (!force && d && Date.now() - d.fetchedAt < STALE_MS && d.area === a.name) return;
   if (!navigator.onLine) {
     state.error = 'Frakoblet';
     render();
@@ -201,12 +203,12 @@ async function loadOffers(force = false) {
   state.error = null;
   renderStatus();
   try {
-    const data = await fetchOffers(area(), (done, total) => {
+    const data = await fetchOffers(a, (done, total) => {
       state.loading = `Henter tilbud … ${done}/${total} kundeaviser`;
       renderStatus();
     });
     if (!data.offers.length) throw new Error('Tjek ga ingen tilbud');
-    data.area = area().name;
+    data.area = a.name;
     state.offersData = data;
     await db.set('offers', data);
     rebuildOfferIndex();
@@ -216,6 +218,7 @@ async function loadOffers(force = false) {
   } finally {
     state.loading = false;
     render();
+    if (reloadQueued) { reloadQueued = false; loadOffers(true); }
   }
 }
 
@@ -870,19 +873,86 @@ function renderMore() {
 
 function setArea(a) {
   state.settings.area = a;
+  state.settings.geo = 'done'; // an explicit choice ends the first-run question
   save.settings();
+  renderGeoCard();
   toast(`Område: ${a.name}. Henter tilbud …`);
   loadOffers(true);
 }
 
-function useMyLocation() {
-  if (!navigator.geolocation) { toast('Posisjon er ikke tilgjengelig'); return; }
-  navigator.geolocation.getCurrentPosition(
-    // Rounded to ~1 km: Tjek only needs the neighbourhood, not the user's exact position.
-    (p) => setArea({ name: 'Min posisjon', lat: +p.coords.latitude.toFixed(2), lng: +p.coords.longitude.toFixed(2), radius: 30000 }),
-    () => toast('Fikk ikke tilgang til posisjon'),
-    { maximumAge: 36e5, timeout: 15000 },
-  );
+/* ---------- location: first run asks once, then Mer → Område ---------- */
+const GEO_TIMEOUT_MS = 10000;
+// Rounded to ~1 km: Tjek only needs the neighbourhood, not the user's exact position.
+const roundedArea = (p) => ({ name: 'Min posisjon', lat: +p.coords.latitude.toFixed(2), lng: +p.coords.longitude.toFixed(2), radius: 30000 });
+
+/** One position request → {area} or {error: 'denied' | 'failed' | 'unsupported'}. Never hangs. */
+function locate() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve({ error: 'unsupported' }); return; }
+    let settled = false;
+    const finish = (r) => { if (!settled) { settled = true; clearTimeout(guard); resolve(r); } };
+    // Some browsers never call back when they can't show the prompt (no user gesture); don't wait forever.
+    const guard = setTimeout(() => finish({ error: 'failed' }), GEO_TIMEOUT_MS + 2000);
+    navigator.geolocation.getCurrentPosition(
+      (p) => finish({ area: roundedArea(p) }),
+      (e) => finish({ error: e && e.code === 1 ? 'denied' : 'failed' }),
+      { maximumAge: 36e5, timeout: GEO_TIMEOUT_MS },
+    );
+  });
+}
+
+async function geoPermission() {
+  try { return (await navigator.permissions.query({ name: 'geolocation' })).state; } catch (e) { return 'unknown'; }
+}
+
+let geoBusy = false;
+let geoSeq = 0; // only the newest request counts (a tap can overtake the automatic first try)
+async function useMyLocation({ auto = false } = {}) {
+  const my = ++geoSeq;
+  geoBusy = true;
+  renderGeoCard();
+  const r = await locate();
+  if (my !== geoSeq) return;
+  geoBusy = false;
+  if (r.area) { setArea(r.area); return; }
+  // Automatic first try failed without a "no" (timeout, or no prompt without a tap): keep the card so a tap can ask.
+  if (auto && r.error === 'failed') { renderGeoCard(); return; }
+  geoFallback(r.error);
+}
+
+function geoFallback(reason) {
+  const first = !state.settings.area;
+  state.settings.geo = 'done';
+  save.settings();
+  renderGeoCard();
+  const where = first ? `Viser tilbud for ${DEFAULT_AREA.name}. Bytt i Mer → Område.` : 'Området er uendret.';
+  toast(reason === 'denied' ? `Fikk ikke bruke posisjonen. ${where}` : reason === 'unsupported' ? `Posisjon er ikke tilgjengelig. ${where}` : `Fant ikke posisjonen. ${where}`);
+  if (state.tab === 'mer') renderMore();
+}
+
+/** First start without an area: ask for the location once (Trondheim offers load meanwhile). */
+async function firstRunLocation() {
+  const s = state.settings;
+  if (s.area) { if (s.geo !== 'done') { s.geo = 'done'; save.settings(); } return; } // existing users keep their area
+  if (s.geo === 'done') return;
+  if (s.geo === 'asked') { renderGeoCard(); return; } // asked before without an answer: offer the button, no new prompt
+  const perm = await geoPermission();
+  if (perm === 'denied') { geoFallback('denied'); return; }
+  s.geo = 'asked';
+  save.settings();
+  useMyLocation({ auto: true });
+}
+
+function renderGeoCard() {
+  const el = $('#geo-card');
+  if (!el) return;
+  const show = !state.settings.area && state.settings.geo === 'asked';
+  el.hidden = !show;
+  if (!show) return;
+  el.innerHTML = `<h2>Finn tilbud nær deg</h2>
+    <p>Matkassa bruker posisjonen din, avrundet til omtrent 1 km, til å finne kundeavisene der du handler. Den lagres bare på denne enheten. Uten posisjon viser vi tilbud for ${esc(DEFAULT_AREA.name)}.</p>
+    <div class="actions"><button class="btn btn-primary" type="button" data-action="geo-ask"${geoBusy ? ' aria-busy="true"' : ''}>${geoBusy ? 'Finner posisjon …' : 'Finn tilbud nær deg'}</button>
+    <button class="btn btn-ghost" type="button" data-action="geo-skip">Bruk ${esc(DEFAULT_AREA.name)}</button></div>`;
 }
 
 /* ---------- events ---------- */
@@ -977,7 +1047,8 @@ function bind() {
     if (act === 'import') $('#file-input').click();
     if (act === 'manual') openReceiptDialog();
     if (act === 'export') exportBackup();
-    if (act === 'area-here') useMyLocation();
+    if (act === 'area-here' || act === 'geo-ask') useMyLocation(); // a tap may always ask again (iOS may need the gesture)
+    if (act === 'geo-skip') { state.settings.geo = 'done'; save.settings(); renderGeoCard(); toast(`Viser tilbud for ${DEFAULT_AREA.name}. Bytt i Mer → Område.`); }
     if (act === 'sync-forget') {
       Object.assign(state.settings.sync, { token: '', lastError: null });
       save.settings();
@@ -1138,6 +1209,7 @@ async function start() {
   showTab(['tilbud', 'liste', 'forbruk', 'mer'].includes(hash) ? hash : 'tilbud');
   db.persist().then((p) => (state.persisted = p));
   loadOffers();
+  firstRunLocation();
   if (syncDue()) syncSpending({ quiet: true });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     const hadController = !!navigator.serviceWorker.controller;

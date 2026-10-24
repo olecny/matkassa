@@ -103,4 +103,14 @@ ok(!missing.length, 'sw: every js module is precached for offline', missing.join
 const syncSh = fs.readFileSync(new URL('../ingest/sync.sh', import.meta.url), 'utf8');
 ok(!/olecny/i.test(syncSh) && /OFFENTLIG/.test(syncSh), 'sync.sh: no personal default, refuses public repos');
 
+/* ---------- first-run location (geo) ---------- */
+ok(defaultSettings().geo === null, 'geo: never asked by default');
+ok(mergeSettings(defaultSettings(), { geo: 'done' }).geo === 'done' && mergeSettings(defaultSettings(), { geo: 'x' }).geo === null, 'geo: only known states are kept');
+ok(mergeSettings({ ...defaultSettings(), geo: 'asked' }, { geo: 'done' }, { fromBackup: true }).geo === 'asked', 'geo: a backup never changes this device\'s location state');
+ok(mergeSettings({ ...defaultSettings(), geo: 'done' }, { chains: [] }).geo === 'done', 'geo: kept when stored settings lack the field');
+
+/* ---------- service worker: shared origin with Matkassa Premium ---------- */
+ok(/k\.startsWith\(PREFIX\) && k !== VERSION/.test(swSrc) && /const PREFIX = 'matkassa-v'/.test(swSrc), 'sw: only deletes its own caches (premium copy shares the origin)');
+ok(!'matkassa-premium-v1'.startsWith('matkassa-v') && !'matkassa-premium-img'.startsWith('matkassa-v'), 'sw: premium cache names fall outside this prefix');
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
