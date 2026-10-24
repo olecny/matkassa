@@ -30,9 +30,15 @@
   </header>
 
   <main>
+    <div id="geo-card" class="card geo-card" role="region" aria-label="Finn tilbud nær deg" hidden></div>
+
+    <!-- Hjem -->
+    <section id="view-hjem" class="view" data-title="Hjem">
+      <div id="home-body"></div>
+    </section>
+
     <!-- Tilbud -->
-    <section id="view-tilbud" class="view" data-title="Tilbud">
-      <div id="geo-card" class="card geo-card" role="region" aria-label="Finn tilbud nær deg" hidden></div>
+    <section id="view-tilbud" class="view" data-title="Tilbud" hidden>
       <div class="toolbar">
         <label class="search">
           <span class="sr-only">Søk i tilbud</span>
@@ -95,7 +101,11 @@
   </main>
 
   <nav class="tabbar" aria-label="Hovedmeny">
-    <button type="button" data-tab="tilbud" aria-current="page">
+    <button type="button" data-tab="hjem" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>Hjem</span>
+    </button>
+    <button type="button" data-tab="tilbud">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8L3 12z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>
       <span>Tilbud</span>
     </button>

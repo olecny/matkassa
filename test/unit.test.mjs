@@ -1,6 +1,6 @@
 // Run: node test/unit.test.mjs   (no dependencies). All data here is FAKE test data.
 import fs from 'node:fs';
-import { detectImport, summarize, toNumber, mergeReceipts } from '../js/spending.js';
+import { detectImport, summarize, toNumber, mergeReceipts, monthCompare } from '../js/spending.js';
 import { makeClassifier, DEFAULT_CATEGORIES, tokens } from '../js/categories.js';
 import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
@@ -119,5 +119,17 @@ ok(/__APP_DIR__/.test(tpl) && /__PATH__/.test(tpl) && !/\/Users\//.test(tpl) && 
 const runSync = fs.readFileSync(new URL('../ingest/launchd/run-sync.sh', import.meta.url), 'utf8');
 ok(/GIT_TERMINAL_PROMPT=0/.test(runSync) && /last-run\.txt/.test(runSync) && /mask/.test(runSync), 'launchd: no git prompts, status file, token masking');
 ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('ingest/logs/'), 'launchd: logs are git-ignored');
+
+/* ---------- Hjem: this month vs same time last month ---------- */
+{
+  const R = (date, total) => ({ date, total });
+  const c = monthCompare([R('2026-10-02', 300), R('2026-10-20', 200), R('2026-09-05', 100), R('2026-09-24', 999), R('2026-09-30', 50), R('2026-08-01', 7)], '2026-10-24');
+  ok(c.thisKey === '2026-10' && c.lastKey === '2026-09', 'hjem: month keys');
+  ok(c.now === 500 && c.count === 2, 'hjem: this month so far');
+  ok(c.lastSoFar === 1099 && c.lastAll === 1149, 'hjem: last month up to the same day vs whole month');
+  const j = monthCompare([R('2026-12-31', 10), R('2027-01-03', 5), R('2026-12-02', 4)], '2027-01-03');
+  ok(j.lastKey === '2026-12' && j.now === 5 && j.lastSoFar === 4 && j.lastAll === 14, 'hjem: January compares with December');
+  ok(monthCompare([], '2026-10-24').now === 0 && monthCompare([{ total: 5 }, null], '2026-10-24').count === 0, 'hjem: empty and broken receipts');
+}
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
