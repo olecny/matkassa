@@ -1,6 +1,6 @@
 // Run: node test/unit.test.mjs   (no dependencies). All data here is FAKE test data.
 import fs from 'node:fs';
-import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts } from '../js/spending.js';
+import { detectImport, detectImportText, summarize, toNumber, mergeReceipts, monthCompare, parseCSV, dedupeReceipts, validateReceipts, notFinite } from '../js/spending.js';
 import { makeClassifier, DEFAULT_CATEGORIES, tokens } from '../js/categories.js';
 import { buildProfile, scoreOffer, normEan, productKey } from '../js/profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from '../js/extra-offers.js';
@@ -218,6 +218,54 @@ ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('
   ok(d.receipts.some((r) => r.id === 'trumf-b988'), 'dedupe: same total two hours later is a different purchase');
   const m = mergeReceipts([innsyn], [api, later]);
   ok(m.receipts.length === 2 && m.duplicates === 1, 'dedupe: merge reports collapsed duplicates', JSON.stringify({ n: m.receipts.length, d: m.duplicates, a: m.added }));
+}
+
+
+/* ---------- Maria round 3: import validation, monthCompare with Date, merge with holes (all FAKE data) ---------- */
+{
+  const NOW = Date.parse('2026-10-25T12:00:00');
+  const spendingFile = (receipts) => JSON.stringify({ schema: 'matkassa.spending/1', receipts });
+  const imp = detectImportText(spendingFile([
+    { id: 'ok-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-24', total: 100, lines: [] },
+    { id: 'neg-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-23', total: -50, lines: [] },
+    { id: 'fut-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-30', total: 10, lines: [] },
+    { id: 'tom-1', store: 'TESTBUTIKK (FAKE)', date: '2026-10-26', total: 10, lines: [] },
+  ]), { now: NOW });
+  ok(imp.data.map((r) => r.id).sort().join() === 'ok-1,tom-1', 'validate: keeps a normal receipt and one dated tomorrow', imp.data.map((r) => r.id).join());
+  ok(imp.rejected.length === 2 && imp.rejected.some((r) => r.id === 'neg-1' && r.reason === 'negativ') && imp.rejected.some((r) => r.id === 'fut-1' && r.reason === 'fremtid'), 'validate: rejects a negative total and a date more than a day ahead');
+  ok(imp.rejected.every((r) => /^Kvitteringen \d{2}\.\d{2}\.\d{4} fra TESTBUTIKK \(FAKE\) .*hoppet over\.$/.test(r.message)) && /negativt beløp \(−?-?50,00 kr\)/.test(imp.rejected.find((r) => r.reason === 'negativ').message), 'validate: one friendly Norwegian message per rejected receipt', imp.rejected.map((r) => r.message).join(' | '));
+  // 1e309 in JSON is Infinity: never read as 0 or Infinity
+  const inf = detectImportText('{"schema":"matkassa.spending/1","receipts":[{"id":"inf-1","store":"FAKE","date":"2026-10-20","total":1e309,"lines":[]},{"id":"inf-2","store":"FAKE","date":"2026-10-20","total":20,"lines":[{"name":"X","amount":1e309}]},{"id":"ok-2","store":"FAKE","date":"2026-10-20","total":20,"lines":[]}]}', { now: NOW });
+  ok(inf.data.map((r) => r.id).join() === 'ok-2' && inf.rejected.length === 2 && inf.rejected.every((r) => r.reason === 'tall'), 'validate: non-finite total or line amount (1e309) is rejected, not 0 or Infinity', JSON.stringify(inf.rejected.map((r) => r.id)));
+  ok(notFinite(Infinity) && notFinite('1e309') && !notFinite('24,90') && !notFinite(null) && !notFinite('') && !notFinite(0), 'validate: notFinite');
+  const tr = detectImport([{ dato: '01.01.2030 12:00', kvitteringsnummer: 'F1', kjede: 'KIWI', butikknavn: 'KIWI (FAKE)', varelinjer: [{ varenavn: 'X', vareBelop: '10,00' }] }, { dato: '03.10.2026 12:00', kvitteringsnummer: 'F2', kjede: 'KIWI', butikknavn: 'KIWI (FAKE)', totalBelop: '-12,00', varelinjer: [] }, { dato: '03.10.2026 12:00', kvitteringsnummer: 'F3', kjede: 'KIWI', varelinjer: [{ varenavn: 'X', vareBelop: '1e309' }] }], { now: NOW });
+  ok(tr.kind === 'trumf' && tr.data.length === 0 && tr.rejected.map((r) => r.reason).join() === 'fremtid,negativ,tall', 'validate: Trumf innsyn too (future, negative, non-finite)', JSON.stringify(tr.rejected));
+  const coop = detectImportText('Dato;Butikk;Totalbeløp\n03.10.2026;Coop Extra (FAKE);-99,00\n04.10.2026;Coop Extra (FAKE);1e309\n05.10.2026;Coop Extra (FAKE);45,00\n', { now: NOW });
+  ok(coop.kind === 'coop' && coop.data.length === 1 && coop.rejected.length === 2, 'validate: Coop CSV too', JSON.stringify(coop.rejected));
+  ok(validateReceipts([null, undefined, { id: 'a', date: '2026-10-01', total: 1 }], NOW).receipts.length === 1, 'validate: holes in the list are skipped');
+  ok(!('_bad' in imp.data[0]), 'validate: no internal marker left on kept receipts');
+
+  // monthCompare: Date or ISO string, month boundaries
+  const R = (date, total) => ({ id: date + total, date, total });
+  const rs = [R('2026-10-02', 300), R('2026-09-05', 100), R('2026-09-30', 50)];
+  const a = monthCompare(rs, '2026-10-24');
+  ok(JSON.stringify(monthCompare(rs, new Date(2026, 9, 24, 15, 30))) === JSON.stringify(a) && JSON.stringify(monthCompare(rs, '2026-10-24T09:00:00')) === JSON.stringify(a), 'monthCompare: a Date, an ISO day and an ISO timestamp give the same result');
+  const d31 = monthCompare([R('2026-10-31', 10), R('2026-09-30', 7), R('2026-09-01', 3)], new Date(2026, 9, 31));
+  ok(d31.thisKey === '2026-10' && d31.lastKey === '2026-09' && d31.now === 10 && d31.lastSoFar === 10 && d31.lastAll === 10, 'monthCompare: the 31st (previous month has 30 days)', JSON.stringify(d31));
+  const mar = monthCompare([R('2026-03-31', 5), R('2026-02-28', 4), R('2026-02-01', 1)], '2026-03-31');
+  ok(mar.lastKey === '2026-02' && mar.lastSoFar === 5 && mar.lastAll === 5, 'monthCompare: 31 March vs February (28 days)', JSON.stringify(mar));
+  const feb = monthCompare([R('2028-02-29', 8), R('2028-01-29', 2), R('2028-01-30', 9)], new Date(2028, 1, 29));
+  ok(feb.thisKey === '2028-02' && feb.lastKey === '2028-01' && feb.now === 8 && feb.lastSoFar === 2 && feb.lastAll === 11, 'monthCompare: leap day 29 February', JSON.stringify(feb));
+  const ny = monthCompare([R('2027-01-01', 6), R('2026-12-01', 4), R('2026-12-31', 9)], new Date(2027, 0, 1));
+  ok(ny.thisKey === '2027-01' && ny.lastKey === '2026-12' && ny.now === 6 && ny.lastSoFar === 4 && ny.lastAll === 13, 'monthCompare: New Year (1 January vs December)', JSON.stringify(ny));
+  ok(monthCompare(null, '2026-10-24').now === 0, 'monthCompare: no receipts at all');
+  let threw = false; try { monthCompare([], 'not a date'); } catch { threw = true; }
+  ok(threw, 'monthCompare: rejects a bad date instead of guessing');
+
+  // mergeReceipts tolerates holes
+  const mm = mergeReceipts([null, R('2026-10-01', 5), undefined], [R('2026-10-02', 6), null]);
+  ok(mm.receipts.length === 2 && mm.added === 1 && mm.receipts.every(Boolean), 'merge: null/undefined entries in the existing list (and the new one) are ignored');
+  ok(mergeReceipts(undefined, [R('2026-10-02', 6)]).receipts.length === 1, 'merge: no existing list at all');
 }
 
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

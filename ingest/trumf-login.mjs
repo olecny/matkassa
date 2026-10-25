@@ -23,8 +23,17 @@ if (!fs.existsSync(CHROME)) { console.error(`Fant ikke Chrome (${CHROME}). Sett 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'matkassa-trumf-login-'));
 const extra = process.env.MATKASSA_CHROME_ARGS ? JSON.parse(process.env.MATKASSA_CHROME_ARGS) : []; // test only (headless + fake host)
 const chrome = spawn(CHROME, [...extra, '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--new-window', START], { stdio: ['ignore', 'ignore', 'pipe'] });
-const cleanup = () => { try { chrome.kill(); } catch {} setTimeout(() => fs.rmSync(profile, { recursive: true, force: true }), 500); };
-process.on('SIGINT', () => { cleanup(); process.exit(130); });
+// Stop Chrome and delete the temp profile synchronously, on every way out (success, timeout, crash, Ctrl-C, kill).
+// (It used to delete it in a timer that never ran because process.exit came first, so profiles piled up.)
+let cleaned = false;
+const cleanup = () => {
+  if (cleaned) return;
+  cleaned = true;
+  try { chrome.kill('SIGKILL'); } catch {}
+  try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(130); });
 
 const wsUrl = await new Promise((resolve, reject) => {
   let buf = '';

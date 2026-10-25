@@ -8,6 +8,8 @@ import http.server
 import json
 import os
 import shutil
+import signal
+import atexit
 import stat
 import subprocess
 import sys
@@ -132,6 +134,10 @@ ok(out[1]["total"] == 89.9, "trumf: Norwegian decimal comma in an amount")
 # ---------- trumf.py against a FAKE trumf.no ----------
 srv = server()
 home = tempfile.mkdtemp(prefix="matkassa-ingest-test-")
+# Cleaned up on every way out: finally below, atexit, and SIGTERM/SIGHUP (Ctrl-C already runs finally).
+atexit.register(lambda: shutil.rmtree(home, ignore_errors=True))
+for _sig in (signal.SIGTERM, signal.SIGHUP):
+    signal.signal(_sig, lambda *_: sys.exit(130))
 try:
     env = env_for(home, srv)
     st = write_state(home)

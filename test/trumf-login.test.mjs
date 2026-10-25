@@ -18,9 +18,15 @@ const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-T
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'matkassa-trumf-login-test-'));
+// Temp folder and child always cleaned up, also on a crash or Ctrl-C.
+let child = null;
+const cleanupSync = () => { try { if (child && child.exitCode === null) child.kill('SIGKILL'); } catch {} try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} };
+process.on('exit', cleanupSync);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanupSync(); process.exit(130); });
+const profilesBefore = new Set(fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('matkassa-trumf-login-')));
 const state = path.join(tmp, 'sub', 'trumf_state.json');
 
-const child = spawn(process.execPath, [path.join(ROOT, 'ingest', 'trumf-login.mjs')], {
+child = spawn(process.execPath, [path.join(ROOT, 'ingest', 'trumf-login.mjs')], {
   env: { ...process.env, MATKASSA_TRUMF_STATE: state, MATKASSA_TRUMF_START: `http://www.trumf.no:${port}/`,
     MATKASSA_CHROME_ARGS: JSON.stringify(['--headless=new', '--host-resolver-rules=MAP www.trumf.no 127.0.0.1']) },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -37,6 +43,9 @@ ok(saved && saved.cookies.some((c) => c.name === 'next-auth.session-token' && c.
 ok(saved && saved.cookies.every((c) => /trumf\.no$/.test(String(c.domain).replace(/^\./, ''))), 'trumf-login: only trumf.no cookies');
 ok(fs.existsSync(state) && (fs.statSync(state).mode & 0o777) === 0o600 && (fs.statSync(path.dirname(state)).mode & 0o777) === 0o700, 'trumf-login: file 0600 in a 0700 folder');
 ok(!out.includes('FAKE-LOGIN-VALUE') && !out.includes('FAKE-OTHER') && /Innlogget/.test(out), 'trumf-login: never prints cookie values');
-fs.rmSync(tmp, { recursive: true, force: true });
+await new Promise((r) => setTimeout(r, 300));
+const leftover = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('matkassa-trumf-login-') && !f.startsWith('matkassa-trumf-login-test-') && !profilesBefore.has(f));
+ok(!leftover.length, 'trumf-login: deletes its temporary Chrome profile', leftover.join(', '));
+cleanupSync();
 console.log(failed ? `\n${failed} FAILED` : '\nAll trumf-login tests passed');
 process.exit(failed ? 1 : 0);

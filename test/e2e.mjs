@@ -118,6 +118,17 @@ const chrome = spawn(CHROME, [
   '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
   '--hide-scrollbars', '--disable-extensions', '--window-size=390,844', 'about:blank',
 ], { stdio: ['ignore', 'ignore', 'pipe'] });
+// Always remove the temp profile and stop Chrome, also when the run crashes or is interrupted (a full disk once
+// came from leftover profiles). --keep-open skips this on purpose.
+let cleaned = false;
+const cleanupSync = () => {
+  if (cleaned || KEEP) return;
+  cleaned = true;
+  try { chrome.kill('SIGKILL'); } catch {}
+  try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+};
+process.on('exit', cleanupSync);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanupSync(); process.exit(130); });
 const wsUrl = await new Promise((resolve, reject) => {
   let buf = '';
   const t = setTimeout(() => reject(new Error('Chrome did not start (set CHROME=…)')), 20000);
@@ -752,7 +763,7 @@ try {
     chrome.kill();
     server.close();
     await sleep(300);
-    fs.rmSync(profile, { recursive: true, force: true });
+    cleanupSync();
   }
   process.exit(fail ? 1 : 0);
 }

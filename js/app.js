@@ -7,7 +7,7 @@ import { defaultSettings, mergeSettings, validArea } from './settings.js';
 import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 const STALE_MS = 6 * 60 * 60 * 1000;
 const PAGE = 60;
 const TABS = ['hjem', 'tilbud', 'liste', 'forbruk', 'mer'];
@@ -158,7 +158,7 @@ function toast(msg) {
   t.textContent = msg;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 2600);
+  toastTimer = setTimeout(() => (t.hidden = true), Math.min(12000, Math.max(2600, msg.length * 55))); // long messages stay readable
 }
 
 /* ---------- tabs ---------- */
@@ -784,9 +784,16 @@ async function importFile(file) {
     state.receipts = receipts;
     await save.receipts();
     if (res.data.length) state.month = res.data.map((r) => r.date).sort().pop().slice(0, 7);
-    toast(`${{ trumf: 'Trumf', coop: 'Coop' }[res.kind] || 'spending.json'}: ${added} nye${updated ? `, ${updated} oppdatert` : ''} kvitteringer${duplicates ? ` (${duplicates} dobbelt fra flere kilder slått sammen)` : ''}`);
+    toast(`${{ trumf: 'Trumf', coop: 'Coop' }[res.kind] || 'spending.json'}: ${added} nye${updated ? `, ${updated} oppdatert` : ''} kvitteringer${duplicates ? ` (${duplicates} dobbelt fra flere kilder slått sammen)` : ''}${rejectedText(res.rejected)}`);
   }
   render();
+}
+
+/** One friendly sentence per receipt that was left out of an import (negative, future date, not a number). */
+function rejectedText(rejected) {
+  if (!rejected || !rejected.length) return '';
+  const shown = rejected.slice(0, 5).map((r) => r.message).join(' ');
+  return `. ${rejected.length} hoppet over: ${shown}${rejected.length > 5 ? ` Og ${rejected.length - 5} til.` : ''}`;
 }
 
 /* ---------- sync from the user's own private GitHub repo (written by ingest/ on their Mac) ---------- */
@@ -816,7 +823,7 @@ async function syncSpending({ quiet = false } = {}) {
     if (!REPO_RE.test(s.repo) || !PATH_RE.test(s.path) || s.path.includes('..')) throw new Error('Ugyldig repo eller filsti');
     const json = await ghFile(s, s.path);
     if (json === null) throw new Error(`Fant ikke ${s.path} i ${s.repo} (eller nøkkelen har ikke tilgang til repoet)`);
-    const { kind, data } = detectImport(json);
+    const { kind, data, rejected } = detectImport(json);
     if (kind === 'backup') throw new Error('Synkfila er en backup, ikke kvitteringer');
     const { receipts, added } = mergeReceipts(state.receipts, data);
     state.receipts = receipts;
@@ -836,7 +843,7 @@ async function syncSpending({ quiet = false } = {}) {
     s.lastError = null;
     await Promise.all([save.receipts(), save.settings()]);
     if (added && data.length) state.month = data.map((r) => r.date).sort().pop().slice(0, 7);
-    if (!quiet || added) toast(added ? `Synk: ${added} nye kvitteringer` : 'Synk: ingen nye kvitteringer');
+    if (!quiet || added || rejected.length) toast((added ? `Synk: ${added} nye kvitteringer` : 'Synk: ingen nye kvitteringer') + rejectedText(rejected));
   } catch (e) {
     s.lastError = e.message;
     save.settings();
