@@ -396,3 +396,10 @@ dialog label.check input { width: 22px; height: 22px; }
 .conns li:first-child { border-top: 0; }
 .conns span { display: grid; min-width: 0; }
 .conns small { color: var(--text-3); }
+
+/* start-up failed: a way out instead of a blank screen */
+#crash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--text); }
+#crash .crash-box { max-width: 420px; display: grid; gap: 12px; }
+#crash h2 { margin: 0; font-size: 1.25rem; }
+#crash p { margin: 0; color: var(--text-2, inherit); line-height: 1.45; }
+#crash .btn { min-height: 44px; }

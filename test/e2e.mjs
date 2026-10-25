@@ -593,6 +593,26 @@ try {
   check(st.sync.repo === FAKE_REPO && st.sync.token === FAKE_TOKEN && st.sync.path === 'spending.json', 'restore: backup cannot change this device\'s sync repo/token/path');
   check(st.area === null && Array.isArray(st.chains) && Array.isArray(st.hiddenChains), 'restore: broken area/chains in a backup are sanitised');
 
+  // 4c. A backup with null and broken entries (Maria 4b): checked before anything is saved, and the app still starts
+  const poisoned = JSON.parse(backup);
+  poisoned.categories = [null, 7, ...poisoned.categories, { name: 'uten id (FAKE)' }];
+  poisoned.rules = [null, ...(poisoned.rules || []), { pattern: null, categoryId: 'meieri' }];
+  poisoned.list = [null, 'bare tekst', ...(poisoned.list || [])];
+  poisoned.receipts = [null, ...(poisoned.receipts || []),
+    { id: 'old-FAKE', date: '1900-01-01', total: 10, store: 'FAKE' },
+    { id: 'huge-FAKE', date: '2026-10-01', total: 99999999999, store: 'FAKE' },
+    { id: 'abc-FAKE', date: '2026-10-01', total: 'abc', store: 'FAKE' }];
+  const poisonFile = path.join(OUT, 'backup-poisoned-FAKE.json');
+  fs.writeFileSync(poisonFile, JSON.stringify(poisoned));
+  const poisonToast = await importFixture(poisonFile);
+  check(/hoppet over/.test(poisonToast) && /før år 2000/.test(poisonToast), 'restore: broken entries are skipped, with a message', poisonToast.slice(0, 200));
+  const stored = await evaluate(`const db = await new Promise(r => { const q = indexedDB.open('${APP_DB}'); q.onsuccess = () => r(q.result); });
+    const get = (k) => new Promise(r => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => r(q.result); });
+    const out = {}; for (const k of ['categories', 'rules', 'list', 'receipts']) { const v = await get(k); out[k] = Array.isArray(v) && v.every((x) => x && typeof x === 'object'); } return out;`);
+  check(Object.values(stored).every(Boolean), 'restore: nothing broken reaches the database', JSON.stringify(stored));
+  await navigate(BASE + 'index.html#hjem');
+  check(await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length > 0`) && !(await evaluate(`return !!document.querySelector('#crash');`)), 'restore: the app starts normally after a broken backup');
+
   // 5. Learning: "Tilbud for deg", EAN vs name
   await tab('tilbud');
   check(await waitFor(`!document.querySelector('#for-deg').hidden`), '"Tilbud for deg" appears after receipts are synced');
@@ -744,6 +764,16 @@ try {
   const errs = consoleErrors.filter((e) => !/ERR_INTERNET_DISCONNECTED|Failed to fetch|net::ERR_|Tjek-feil|status of 40[14]|status of 400 \(Bad Request\) https:\/\/matkassa-fake\.supabase\.co\/auth\/v1\/token\?grant_type=password/.test(e));
   check(!errs.length, 'no unexpected console errors', errs.slice(0, 5).join(' | '));
   if (dialogs.length) warn('confirm()/alert() dialogs auto-accepted', dialogs.join(' | '));
+
+  // 13. A start-up that fails shows a way out, never a blank screen (Maria 4b). Runs last: it resets the data.
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: `{ const q = Document.prototype.querySelector; Document.prototype.querySelector = function (s) { if (s === '#home-body') throw new Error('FAKE start-up failure'); return q.call(this, s); }; }` }, S);
+  await navigate(BASE + 'index.html#hjem');
+  check(await waitFor(`!!document.querySelector('#crash') && /Noe gikk galt/.test(document.querySelector('#crash').textContent)`), 'crash: a failed start shows "Noe gikk galt – tilbakestill data?"');
+  await send('Page.removeScriptToEvaluateOnNewDocument', { identifier }, S);
+  try { await evaluate(`document.querySelector('#crash-reset').click(); return true;`); } catch { /* reloading */ }
+  await sleep(1500);
+  check(await waitFor(`!document.querySelector('#crash') && document.querySelector('#home-body') && document.querySelector('#home-body').children.length > 0`, 10000)
+    && (await kv('list') ?? []).length === 0 && (await kv('settings')) !== null, 'crash: "Tilbakestill data" clears the data (keeps settings) and the app starts');
 } catch (e) {
   check(false, 'test run crashed', e.stack || e.message);
 } finally {

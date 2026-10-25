@@ -119,11 +119,12 @@ export function keywordCategory(text) {
  * Returns a category id that exists in `categories`, or null (= Ukategorisert).
  */
 export function makeClassifier(categories, rules) {
-  const valid = new Set(categories.map((c) => c.id));
+  // tolerant: null or odd entries (an old or broken backup) are skipped, never thrown on
+  const valid = new Set((Array.isArray(categories) ? categories : []).filter((c) => c && typeof c === 'object' && c.id != null).map((c) => String(c.id)));
   const eanRules = new Map();
   const textRules = [];
-  for (const r of rules || []) {
-    if (!valid.has(r.categoryId)) continue;
+  for (const r of Array.isArray(rules) ? rules : []) {
+    if (!r || typeof r !== 'object' || r.pattern == null || !valid.has(String(r.categoryId))) continue;
     if (r.type === 'ean') eanRules.set(String(r.pattern).trim(), r.categoryId);
     else textRules.push({ p: normalize(r.pattern), c: r.categoryId });
   }

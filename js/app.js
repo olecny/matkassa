@@ -4,7 +4,7 @@ import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categor
 import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
 import { defaultSettings, mergeSettings, validArea } from './settings.js';
-import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA } from './spending.js';
+import { detectImport, detectImportText, mergeReceipts, summarize, monthCompare, toNumber, UNCAT, BACKUP_SCHEMA, cleanBackup, cleanCategories, cleanRules, cleanList, validateReceipts, notFinite, friendlyError } from './spending.js';
 import { Cloud, cloudConfigured, reconcile, pickSettings, hash, COLLECTIONS } from './cloud.js';
 
 const APP_VERSION = '0.6.1';
@@ -735,6 +735,7 @@ function saveManualReceipt() {
     if (!m) { err.textContent = `Forstår ikke linjen «${s}». Skriv «navn; beløp».`; return false; }
     lines.push({ name: m[1].trim(), amount: toNumber(m[2]) ?? 0 });
   }
+  if (notFinite(f.total.value)) { err.textContent = 'Beløpet må være et tall, f.eks. 249,90.'; return false; }
   let total = toNumber(f.total.value);
   if (total == null) total = lines.reduce((s, l) => s + l.amount, 0);
   if (!f.store.value.trim()) { err.textContent = 'Skriv inn butikk.'; return false; }
@@ -752,6 +753,8 @@ function saveManualReceipt() {
     category: f.category.value || null,
     lines,
   };
+  const v = validateReceipts([r]);
+  if (v.rejected.length) { err.textContent = v.rejected[0].message.replace(', og ble hoppet over.', '.'); return false; }
   state.receipts = mergeReceipts(state.receipts, [r]).receipts;
   save.receipts();
   state.month = r.date.slice(0, 7);
@@ -765,20 +768,23 @@ async function importFile(file) {
   try {
     res = detectImportText(await file.text());
   } catch (e) {
-    toast(e.message);
+    toast(friendlyError(e));
     return;
   }
   if (res.kind === 'backup') {
     const b = res.data;
     if (!confirm(`Gjenopprette backup fra ${b.exported ? new Date(b.exported).toLocaleString('nb-NO') : 'ukjent dato'}? Dette erstatter kategorier, regler, kvitteringer og handlelisten på denne enheten.`)) return;
-    if (Array.isArray(b.categories) && b.categories.length) state.categories = b.categories;
-    state.rules = Array.isArray(b.rules) ? b.rules : [];
-    state.receipts = Array.isArray(b.receipts) ? b.receipts : [];
-    state.list = Array.isArray(b.list) ? b.list : [];
-    if (b.settings) state.settings = mergeSettings(state.settings, b.settings, { fromBackup: true }); // keeps this device's repo + token
+    const c = cleanBackup(b); // checked before anything is saved: a bad entry must never reach the database
+    if (c.categories) state.categories = c.categories;
+    state.rules = c.rules;
+    state.receipts = c.receipts;
+    state.list = c.list;
+    if (c.settings) state.settings = mergeSettings(state.settings, c.settings, { fromBackup: true }); // keeps this device's repo + token
+    b.rejected = c.rejected;
+    b.dropped = c.dropped;
     await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
     rebuildClassifier();
-    toast('Backup gjenopprettet');
+    toast('Backup gjenopprettet' + (b.dropped ? `. ${b.dropped} ødelagte oppføringer ble hoppet over` : '') + rejectedText(b.rejected));
   } else {
     const { receipts, added, updated, duplicates } = mergeReceipts(state.receipts, res.data);
     state.receipts = receipts;
@@ -845,9 +851,9 @@ async function syncSpending({ quiet = false } = {}) {
     if (added && data.length) state.month = data.map((r) => r.date).sort().pop().slice(0, 7);
     if (!quiet || added || rejected.length) toast((added ? `Synk: ${added} nye kvitteringer` : 'Synk: ingen nye kvitteringer') + rejectedText(rejected));
   } catch (e) {
-    s.lastError = e.message;
+    s.lastError = friendlyError(e);
     save.settings();
-    if (!quiet) toast('Synk feilet: ' + e.message);
+    if (!quiet) toast('Synk feilet: ' + friendlyError(e));
   } finally {
     syncing = false;
     render();
@@ -1034,8 +1040,8 @@ async function cloudSync({ quiet = false } = {}) {
     if (!quiet) toast('Synket med kontoen');
     cloud.connections().then((c) => { cloudState.connections = c; if (state.tab === 'mer') renderMore(); }).catch(() => {});
   } catch (e) {
-    cloudState.error = e.message;
-    if (!quiet) toast(e.message);
+    cloudState.error = friendlyError(e);
+    if (!quiet) toast(friendlyError(e));
   } finally {
     cloudApplying = false;
     cloudState.busy = false;
@@ -1117,8 +1123,8 @@ async function accountAction(act, btn) {
       toast('Dataene dine i skyen er slettet, og du er logget ut');
     }
   } catch (e) {
-    cloudState.error = e.message;
-    toast(e.message);
+    cloudState.error = friendlyError(e);
+    toast(friendlyError(e));
   }
   renderMore();
 }
@@ -1418,7 +1424,7 @@ function bind() {
     if (c) { $('#connect-text').textContent = CONNECT_HELP[c.dataset.connect]; $('#dlg-connect').showModal(); return; }
     const d = e.target.closest('[data-disconnect]');
     if (d && cloud && confirm('Koble fra? Den lagrede innloggingen hos kjeden slettes fra serveren, og kvitteringer hentes ikke lenger automatisk. Kvitteringene du alt har, beholdes.')) {
-      try { await cloud.disconnect(d.dataset.disconnect); cloudState.connections = (cloudState.connections || []).filter((x) => x.chain !== d.dataset.disconnect); toast('Koblet fra'); } catch (err) { toast(err.message); }
+      try { await cloud.disconnect(d.dataset.disconnect); cloudState.connections = (cloudState.connections || []).filter((x) => x.chain !== d.dataset.disconnect); toast('Koblet fra'); } catch (err) { toast(friendlyError(err)); }
       renderMore();
     }
   });
@@ -1431,7 +1437,7 @@ function bind() {
         toast(`Logget inn som ${cloud.user.email}`);
         renderMore();
         await cloudSync();
-      } catch (err) { cloudState.error = err.message; toast(err.message); renderMore(); }
+      } catch (err) { cloudState.error = friendlyError(err); toast(friendlyError(err)); renderMore(); }
       return;
     }
     if (e.target.id === 'sync-form') {
@@ -1476,10 +1482,11 @@ async function start() {
     );
     if (offers) state.offersData = offers;
     if (extraOffers && Array.isArray(extraOffers.offers)) state.extraOffers = extraOffers;
-    if (list) state.list = list;
-    if (categories && categories.length) state.categories = categories;
-    if (rules) state.rules = rules;
-    if (receipts) state.receipts = receipts;
+    if (list) state.list = cleanList(list);
+    const cats = cleanCategories(categories);
+    if (cats.length) state.categories = cats;
+    if (rules) state.rules = cleanRules(rules);
+    if (Array.isArray(receipts)) state.receipts = receipts.filter((r) => r && typeof r === 'object' && !Array.isArray(r));
     if (settings) state.settings = mergeSettings(state.settings, settings);
   } catch (e) {
     console.error('Lagring utilgjengelig', e);
@@ -1490,7 +1497,7 @@ async function start() {
   if (cloud) {
     await cloud.init().catch(() => null);
     if (/access_token=|error_description=/.test(tabHash)) { // back from a magic link
-      try { await cloud.fromRedirect(tabHash); toast(`Logget inn som ${cloud.user.email}`); } catch (e) { cloudState.error = e.message; toast(e.message); }
+      try { await cloud.fromRedirect(tabHash); toast(`Logget inn som ${cloud.user.email}`); } catch (e) { cloudState.error = friendlyError(e); toast(friendlyError(e)); }
       tabHash = 'mer';
       try { history.replaceState(null, '', location.pathname + '#mer'); } catch (e) { /* file:// */ }
     }
@@ -1508,4 +1515,26 @@ async function start() {
   }
 }
 
-start();
+/* ---------- recovery: never a blank screen ---------- */
+const DATA_KEYS = ['list', 'categories', 'rules', 'receipts', 'offers', 'extraOffers', 'savings', 'catVersion'];
+function showCrash(e) {
+  console.error('Oppstart feilet', e);
+  if (document.querySelector('#crash')) return;
+  const d = document.createElement('div');
+  d.id = 'crash';
+  d.setAttribute('role', 'alertdialog');
+  d.setAttribute('aria-labelledby', 'crash-h');
+  d.innerHTML = `<div class="crash-box"><h2 id="crash-h">Noe gikk galt – tilbakestill data?</h2>
+    <p>Appen klarte ikke å starte, trolig på grunn av ødelagte data på denne enheten. Du kan prøve igjen, eller tilbakestille handlelisten, kategoriene, reglene og kvitteringene her. Innstillingene beholdes.</p>
+    <button type="button" id="crash-retry" class="btn">Prøv igjen</button>
+    <button type="button" id="crash-reset" class="btn btn-primary">Tilbakestill data</button></div>`;
+  document.body.append(d);
+  d.querySelector('#crash-retry').addEventListener('click', () => location.reload());
+  d.querySelector('#crash-reset').addEventListener('click', async () => {
+    if (!confirm('Slette handlelisten, kategoriene, reglene og kvitteringene på denne enheten? Det kan ikke angres.')) return;
+    await Promise.all(DATA_KEYS.map((k) => db.del(k).catch(() => null)));
+    location.reload();
+  });
+}
+
+start().catch(showCrash);
