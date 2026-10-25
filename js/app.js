@@ -56,7 +56,15 @@ const save = {
   settings: () => synced(db.set('settings', state.settings)),
 };
 
+const DEFAULT_IDS = new Set(DEFAULT_CATEGORIES.map((c) => c.id));
+/** A category list the app can work with: at least one built-in category. Without them nothing is classified
+ * (everything Ukategorisert, "Kun mat" lets everything through). */
+const usableCategories = (cats) => Array.isArray(cats) && cats.some((c) => c && typeof c === 'object' && DEFAULT_IDS.has(c.id));
 function rebuildClassifier() {
+  if (!usableCategories(state.categories)) { // safety net for any path (sync, copy, storage): back to the defaults
+    state.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+    save.categories();
+  }
   classify = makeClassifier(state.categories, state.rules);
   rebuildOfferIndex();
 }
@@ -775,7 +783,8 @@ async function importFile(file) {
     const b = res.data;
     if (!confirm(`Gjenopprette backup fra ${b.exported ? new Date(b.exported).toLocaleString('nb-NO') : 'ukjent dato'}? Dette erstatter kategorier, regler, kvitteringer og handlelisten på denne enheten.`)) return;
     const c = cleanBackup(b); // checked before anything is saved: a bad entry must never reach the database
-    if (c.categories) state.categories = c.categories;
+    if (usableCategories(c.categories)) state.categories = c.categories; // never wipe the user's categories with a broken list
+    else if (Array.isArray(b.categories) && b.categories.length) b.keptCategories = true;
     state.rules = c.rules;
     state.receipts = c.receipts;
     state.list = c.list;
@@ -784,7 +793,7 @@ async function importFile(file) {
     b.dropped = c.dropped;
     await Promise.all([save.categories(), save.rules(), save.receipts(), save.list(), save.settings()]);
     rebuildClassifier();
-    toast('Backup gjenopprettet' + (b.dropped ? `. ${b.dropped} ødelagte oppføringer ble hoppet over` : '') + rejectedText(b.rejected));
+    toast('Backup gjenopprettet' + (b.keptCategories ? '. Kategoriene i fila var ødelagt, så dine er beholdt' : '') + (b.dropped ? `. ${b.dropped} ${b.dropped === 1 ? "ødelagt oppføring" : "ødelagte oppføringer"} ble hoppet over` : '') + rejectedText(b.rejected));
   } else {
     const { receipts, added, updated, duplicates } = mergeReceipts(state.receipts, res.data);
     state.receipts = receipts;
@@ -1484,7 +1493,7 @@ async function start() {
     if (extraOffers && Array.isArray(extraOffers.offers)) state.extraOffers = extraOffers;
     if (list) state.list = cleanList(list);
     const cats = cleanCategories(categories);
-    if (cats.length) state.categories = cats;
+    if (usableCategories(cats)) state.categories = cats;
     if (rules) state.rules = cleanRules(rules);
     if (Array.isArray(receipts)) state.receipts = receipts.filter((r) => r && typeof r === 'object' && !Array.isArray(r));
     if (settings) state.settings = mergeSettings(state.settings, settings);

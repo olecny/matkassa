@@ -613,6 +613,24 @@ try {
   await navigate(BASE + 'index.html#hjem');
   check(await waitFor(`document.querySelector('#home-body') && document.querySelector('#home-body').children.length > 0`) && !(await evaluate(`return !!document.querySelector('#crash');`)), 'restore: the app starts normally after a broken backup');
 
+  // 4d. Dates of any type and a category list with nothing usable (Jarvis 4c): a message per receipt, categories kept
+  const before4c = await kv('categories');
+  const broken2 = JSON.parse(backup);
+  broken2.categories = [null, { id: 'q' }];
+  broken2.list = [...(broken2.list || []), { id: 'q1-FAKE', text: 'x'.repeat(500), qty: 'abc', unit: 'tonn' }, { id: 'q2-FAKE', text: 'melk (FAKE)', qty: -2, unit: 'l' }];
+  broken2.receipts = [...(broken2.receipts || []),
+    { id: 'numdate-FAKE', date: 20261001, total: 10, store: 'FAKE' },
+    { id: 'nulldate-FAKE', date: null, total: 10, store: { navn: 'FAKE' } },
+    { id: 'objdate-FAKE', date: { y: 2026 }, total: 10, store: 'FAKE' }];
+  const broken2File = path.join(OUT, 'backup-dates-FAKE.json');
+  fs.writeFileSync(broken2File, JSON.stringify(broken2));
+  const t4c = await importFixture(broken2File);
+  check(/hentet inn|gjenopprettet/.test(t4c) && /ukjent dato/.test(t4c) && /mangler en gyldig dato/.test(t4c) && /dine er beholdt/.test(t4c), 'restore 4c: numeric/null/object dates give a friendly message per receipt', t4c.slice(0, 220));
+  const after4c = await kv('categories');
+  const l4c = (await kv('list')).filter((i) => /^q[12]-FAKE$/.test(i.id));
+  check(l4c.length === 2 && l4c[0].text.length === 200 && l4c.every((i) => i.qty === null) && l4c[0].unit === null && l4c[1].unit === 'l', 'restore 4c: list items cleaned (qty a number > 0, known unit, text max 200)', JSON.stringify(l4c.map((i) => [i.text.length, i.qty, i.unit])));
+  check(Array.isArray(after4c) && after4c.length === before4c.length && after4c.some((c) => c.id === 'meieri') && !after4c.some((c) => c.id === 'q'), 'restore 4c: a broken category list never wipes the user\'s categories', JSON.stringify(after4c.map((c) => c.id)));
+
   // 5. Learning: "Tilbud for deg", EAN vs name
   await tab('tilbud');
   check(await waitFor(`!document.querySelector('#for-deg').hidden`), '"Tilbud for deg" appears after receipts are synced');
