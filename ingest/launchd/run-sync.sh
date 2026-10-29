@@ -13,7 +13,7 @@ mkdir -p "$LOGDIR"
 export GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never  # never hang on a password prompt in the background
 unset GIT_TRACE GIT_TRACE_CURL GIT_CURL_VERBOSE GIT_TRACE_PACKET
 
-mask() { sed -E 's/(github_pat_|ghp_|gho_|ghs_|ghu_)[A-Za-z0-9_]+/\1***/g; s/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]+/eyJ***/g; s/AMf-v[A-Za-z0-9_-]+/AMf-v***/g'; }
+mask() { sed -E 's/([Aa]uthorization|[Cc]ookie|[Xx]-[Aa]pi-[Kk]ey)([[:space:]]*[:=][[:space:]]*).*/\1\2***/; s/([Bb]earer|[Bb]asic)[[:space:]]+[A-Za-z0-9._~+\/=:-]{6,}/\1 ***/g; s/(github_pat_|ghp_|gho_|ghs_|ghu_)[A-Za-z0-9_]+/\1***/g; s/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]+/eyJ***/g; s/AMf-v[A-Za-z0-9_-]+/AMf-v***/g'; }
 
 started="$(date '+%Y-%m-%d %H:%M:%S')"
 echo "=== $started start" >> "$LOG"

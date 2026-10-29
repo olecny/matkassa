@@ -48,9 +48,11 @@ case "$(cat "$HOME/fake-sync-mode" 2>/dev/null || echo ok)" in
   ok) echo "2 kvitteringer (FAKE)"; echo "Ferdig."; exit 0 ;;
   expired) echo "HTTP 400 for https://securetoken.googleapis.com/v1/token: INVALID_REFRESH_TOKEN (FAKE) eyJabcdefghijklmnop.FAKEFAKE" >&2
            echo "Ferdig, men feilet: REMA" >&2; exit 3 ;;
+  bearer) echo "curl -H 'Authorization: Bearer __BEARER__' (FAKE)" >&2; echo "HTTP 401 (FAKE): Bearer __BEARER__ Cookie: sid=__BEARER__" >&2; exit 1 ;;
   *) echo "Ingen mottaker (FAKE) token=__REFRESH__" >&2; exit 1 ;;
 esac
-""".replace("__REFRESH__", FAKE_REFRESH)
+""".replace("__REFRESH__", FAKE_REFRESH).replace("__BEARER__", "FAKE-BEARER-abc.DEF_123")
+FAKE_BEARER = "FAKE-BEARER-abc.DEF_123"
 
 
 def free_port():
@@ -261,6 +263,36 @@ class HelperTest(unittest.TestCase):
         self.assertIn("Ingen mottaker", j["rema"]["message"])
         self.assertNotIn(FAKE_REFRESH, json.dumps(j), "a token-shaped value in the sync output never reaches the reply")
 
+    def test_12b_bearer_header_is_masked_everywhere(self):
+        self.set_sync_mode("bearer")
+        self.req("POST", "/sync")
+        j = self.wait_state("connected")
+        self.assertFalse(j["rema"]["lastSyncOk"])
+        self.assertNotIn(FAKE_BEARER, json.dumps(j), "Authorization: Bearer … never reaches the /status reply")
+        self.assertIn("***", j["rema"]["message"])
+        with open(os.path.join(self.home, ".matkassa", "helper-state.json")) as f:
+            self.assertNotIn(FAKE_BEARER, f.read(), "…nor the state file")
+        self.log.flush()
+        with open(self.log.name) as f:
+            self.assertNotIn(FAKE_BEARER, f.read(), "…nor the log")
+
+    def test_12c_mask_formats(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("mk_helper", HELPER)
+        h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(h)
+        for raw in ["Authorization: Bearer FAKE-X", "authorization=Basic RkFLRTpGQUtF", "HTTP 401: bearer FAKEABCDEFG",
+                    "Proxy-Authorization: Digest FAKE", "Cookie: sid=FAKE; b=FAKE", "X-Api-Key: FAKE", "token=FAKE",
+                    '{"refresh_token":"FAKE"}', "Token FAKE-FAKE-FAKE", "eyJFAKEFAKEFAKEFAKE.FAKE", "AMf-vFAKE", "ghp_FAKE"]:
+            self.assertNotIn("FAKE", h.mask(raw).replace("***", ""), raw)
+        self.assertEqual(h.mask("Ingen mottaker"), "Ingen mottaker")
+        # the weekly sync log (launchd/run-sync.sh) masks the same header formats
+        out = subprocess.run(["bash", "-c", "eval \"$(grep '^mask()' ingest/launchd/run-sync.sh)\"; mask"], cwd=ROOT,
+                             input="Authorization: Bearer FAKE-X\nHTTP 401: Bearer FAKEABCDEFG\nCookie: sid=FAKE\n",
+                             capture_output=True, text=True).stdout
+        self.assertNotIn("FAKE", out)
+        self.assertEqual(out.count("***"), 3)
+
     def test_13_sync_expired(self):
         self.set_sync_mode("expired")
         self.req("POST", "/sync")
@@ -315,9 +347,20 @@ class HelperTest(unittest.TestCase):
         self.assertNotIn("Authorization", raw)
 
     def test_20_rate_limit(self):
-        codes = [self.req("GET", "/status", token="WRONG-WRONG")[0] for _ in range(12)]
-        self.assertIn(429, codes)
-        self.assertEqual(self.req("GET", "/status")[0], 429, "even the right code waits a minute after a burst")
+        # requests without any code (an <img src> from any web page) and foreign Origins never count
+        self.assertTrue(all(self.req("GET", "/status", token=None)[0] == 401 for _ in range(15)))
+        self.assertTrue(all(self.req("GET", "/status", token="WRONG-WRONG", origin="https://evil.example")[0] == 403 for _ in range(15)))
+        self.assertEqual(self.req("GET", "/status", origin=TEST_ORIGIN)[0], 200, "a foreign page cannot lock the app out")
+        # wrong codes from the app's Origin: limited after 10 a minute, but the right code still passes
+        codes = [self.req("GET", "/status", token="WRONG-WRONG", origin=TEST_ORIGIN)[0] for _ in range(12)]
+        self.assertEqual(codes[:10], [401] * 10)
+        self.assertEqual(codes[10:], [429, 429])
+        self.assertEqual(self.req("GET", "/status", origin=TEST_ORIGIN)[0], 200, "the right code always passes from the app")
+        # programs on this Mac (no Origin) are counted separately and wait the minute out, right code or not
+        self.assertEqual(self.req("GET", "/status")[0], 200, "the app's lockout does not spill over")
+        codes = [self.req("GET", "/status", token="WRONG-WRONG")[0] for _ in range(11)]
+        self.assertEqual(codes[-1], 429)
+        self.assertEqual(self.req("GET", "/status")[0], 429, "a local brute force stays at 10 guesses a minute")
 
     def test_30_launchd_plist_dry_run(self):
         dest = os.path.join(self.tmp, "no.matkassa.helper.plist")
@@ -332,6 +375,27 @@ class HelperTest(unittest.TestCase):
         self.assertIn("<key>KeepAlive</key>", x)
         self.assertIsNone(re.search(r"__[A-Z_]+__", x))
         self.assertEqual(subprocess.run(["plutil", "-lint", "-s", dest]).returncode, 0)
+
+    def test_31_dry_run_never_writes_launchagents(self):
+        home = os.path.join(self.tmp, "dry-home")
+        os.makedirs(home)
+        out = os.path.join(ROOT, "ingest", "logs", "no.matkassa.helper.plist.dry-run")
+        env = {k: v for k, v in os.environ.items() if k != "MATKASSA_HELPER_PLIST"}
+        env["HOME"] = home
+        try:
+            r = subprocess.run([os.path.join(ROOT, "ingest", "launchd", "install-helper.sh"), "--dry-run"], env=env,
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertFalse(os.path.exists(os.path.join(home, "Library")), "nothing under ~/Library")
+            self.assertTrue(os.path.isfile(out), "the dry run writes into the git-ignored ingest/logs/")
+            env["MATKASSA_HELPER_PLIST"] = os.path.join(home, "Library", "LaunchAgents", "x.plist")
+            r = subprocess.run([os.path.join(ROOT, "ingest", "launchd", "install-helper.sh"), "--dry-run"], env=env,
+                               capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0, "even an explicit LaunchAgents path is refused in a dry run")
+            self.assertFalse(os.path.exists(os.path.join(home, "Library")))
+        finally:
+            if os.path.exists(out):
+                os.remove(out)
 
 
 if __name__ == "__main__":

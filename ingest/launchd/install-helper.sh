@@ -2,14 +2,20 @@
 # Install the Matkassa helper (ingest/helper.py) as a launchd agent for the current macOS user, so the app's
 # "Koble til REMA" button (Mer → Kjeder) can reach this Mac. It listens on 127.0.0.1:47321 only.
 #   ingest/launchd/install-helper.sh             # install + start, then show the pairing code to paste in the app
-#   ingest/launchd/install-helper.sh --dry-run   # only write and check the plist (MATKASSA_HELPER_PLIST=path), no launchctl
+#   ingest/launchd/install-helper.sh --dry-run   # only write and check the plist (ingest/logs/ or MATKASSA_HELPER_PLIST=path), no launchctl
 # Re-run after moving the folder or installing python3/rema somewhere else (the PATH is fixed at install).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$(cd "$HERE/../.." && pwd)"
 LABEL="no.matkassa.helper"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
-DEST="${MATKASSA_HELPER_PLIST:-$HOME/Library/LaunchAgents/$LABEL.plist}"
+# A dry run never touches ~/Library/LaunchAgents: by default it writes into the git-ignored ingest/logs/.
+if [ "$DRY" = 1 ]; then
+  DEST="${MATKASSA_HELPER_PLIST:-$APP/ingest/logs/$LABEL.plist.dry-run}"
+  case "$DEST" in "$HOME/Library/LaunchAgents/"*) echo "--dry-run skriver aldri i ~/Library/LaunchAgents." >&2; exit 1 ;; esac
+else
+  DEST="${MATKASSA_HELPER_PLIST:-$HOME/Library/LaunchAgents/$LABEL.plist}"
+fi
 DOMAIN="gui/$(id -u)"
 
 PY="$(command -v python3 || true)"

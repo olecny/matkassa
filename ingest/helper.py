@@ -45,11 +45,14 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 47321
 LOGIN_TIMEOUT = 10 * 60
 SYNC_TIMEOUT = 30 * 60
-MAX_FAILS = 10  # wrong pairing codes per minute before we answer 429
+MAX_FAILS = 10  # wrong pairing codes per minute, per Origin, before wrong codes get 429
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"  # no 0/O, 1/I/L, U: easy to read and type
 
 # Mask anything token-shaped before it can reach a reply (same patterns as launchd/run-sync.sh).
 _MASKS = [
+    # whole header lines first ("Authorization: Bearer x", "Cookie: a=b", "X-Api-Key: x"), then bare schemes
+    (re.compile(r"(?i)\b(proxy-authorization|authorization|set-cookie|cookie|x-api-key|x-auth-token|apikey|api-key)(\s*[:=]\s*)[^\r\n]+"), r"\1\2***"),
+    (re.compile(r"(?i)\b(bearer|basic|token|digest)\s+[A-Za-z0-9._~+/=:-]{6,}"), r"\1 ***"),
     (re.compile(r"(github_pat_|ghp_|gho_|ghs_|ghu_)[A-Za-z0-9_]+"), r"\1***"),
     (re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]+"), "eyJ***"),
     (re.compile(r"AMf-v[A-Za-z0-9_-]+"), "AMf-v***"),
@@ -144,7 +147,7 @@ class Helper:
         self.lock = threading.Lock()
         self.login_proc = None
         self.syncing = False
-        self.fails = []
+        self.fails = {}  # Origin (or "-" for none) -> times of wrong codes in the last minute
         self.state = read_json(cfg.state_file, {})  # {"rema": {...}}, no secrets in here
         self.code = normalize_code(pairing_code(cfg))
 
@@ -156,18 +159,39 @@ class Helper:
         write_private(self.cfg.state_file, self.state)
 
     # ---- auth ----
-    def authorized(self, header):
+    def authorized(self, header, origin=None):
+        """Check the pairing code. Only called after the Host and Origin checks have passed, so a foreign web page
+        (which always sends its own Origin) is rejected before it gets here and never counts.
+
+        - No Authorization header at all (e.g. an <img src=…> from any page) is just "no": it is not a guess and
+          is not counted, so no page can lock the app out that way.
+        - Wrong codes are counted per Origin. After MAX_FAILS in a minute that Origin gets 429 for wrong codes.
+        - From the app's own (allowed) Origin a correct code always passes, even while that Origin is limited.
+          Requests with no Origin come from programs on this Mac, not from the app; once limited they wait the
+          minute out, right code or not, so a local brute force stays at 10 guesses a minute.
+        The code itself is 16 characters from a 30-letter alphabet (~78 bits)."""
         now = time.monotonic()
-        self.fails = [t for t in self.fails if now - t < 60]
-        if len(self.fails) >= MAX_FAILS:
-            return "limited"
+        key = origin.rstrip("/") if origin else "-"
+        with self.lock:
+            for k in list(self.fails):
+                self.fails[k] = [t for t in self.fails[k] if now - t < 60]
+                if not self.fails[k]:
+                    del self.fails[k]
+            limited = len(self.fails.get(key, ())) >= MAX_FAILS
         m = re.match(r"Bearer\s+(.+)", header or "")
         given = normalize_code(m.group(1)) if m else ""
+        if not given:
+            return "limited" if limited and key == "-" else "no"
+        if limited and key == "-":
+            return "limited"
         # The code file may have been rotated (`pair --new`) while we run: re-read it.
         self.code = normalize_code(read_json(self.cfg.pair_file, {}).get("code")) or self.code
-        if given and hmac.compare_digest(given.encode(), self.code.encode()):
+        if hmac.compare_digest(given.encode(), self.code.encode()):
             return "ok"
-        self.fails.append(now)
+        if limited:
+            return "limited"
+        with self.lock:
+            self.fails.setdefault(key, []).append(now)
         return "no"
 
     # ---- account status (optional) ----
@@ -354,7 +378,7 @@ def make_handler(helper):
             if int(self.headers.get("Content-Length") or 0) > 1024:
                 self._send(413, {"error": "too large"})
                 return False
-            a = helper.authorized(self.headers.get("Authorization"))
+            a = helper.authorized(self.headers.get("Authorization"), self.headers.get("Origin"))
             if a == "limited":
                 self._send(429, {"error": "too many attempts"}, [("Retry-After", "60")])
                 return False
