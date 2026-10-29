@@ -5,6 +5,8 @@
     python3 ingest/cloud.py status
     python3 ingest/cloud.py upload spending.json  # new receipts go to YOUR rows (RLS); existing ones are left alone
     python3 ingest/cloud.py connect trumf|rema    # hand the chain session to the weekly server pull (Edge Function)
+    python3 ingest/cloud.py report rema connected|expired|failing|disconnected [--synced] [--error TEXT]
+                                                  # status only (no token) for "Koblet via Mac-en" in the app
     python3 ingest/cloud.py logout
 
 Uses the same public project URL + anon key as the app (js/cloud-config.js) and your own login, so row-level
@@ -116,7 +118,7 @@ def connect(url, key, chain):
     elif chain == "rema":
         store = os.path.expanduser("~/.rema1000/tokens.json")
         if not os.path.exists(store):
-            raise SystemExit("Logg inn hos REMA først: rema1000 login (rema1000-cli)")
+            raise SystemExit("Logg inn hos REMA først: rema auth login (rema1000-cli), eller Koble til REMA i appen på Mac-en")
         with open(store, encoding="utf-8") as f:
             t = json.load(f)
         secret = json.dumps({"refresh_token": (t.get("firebase") or {}).get("refresh_token", ""), "device_id": t.get("device_id") or ""})
@@ -127,8 +129,24 @@ def connect(url, key, chain):
     print(f"{chain}: koblet til. Serveren henter nye kvitteringer hver søndag. 'Koble fra' i appen sletter økta.", file=sys.stderr)
 
 
+def report(url, key, argv):
+    """Tell the account how the chain login on THIS Mac is doing (used by ingest/helper.py). Never sends a token."""
+    if len(argv) < 2 or argv[0] not in ("rema", "trumf") or argv[1] not in ("connected", "expired", "failing", "disconnected"):
+        raise SystemExit("Bruk: python3 ingest/cloud.py report rema connected|expired|failing|disconnected [--synced] [--error TEKST]")
+    chain, status = argv[0], argv[1]
+    err = argv[argv.index("--error") + 1][:290] if "--error" in argv and argv.index("--error") + 1 < len(argv) else None
+    token, _ = session(url, key)
+    if status == "disconnected":
+        # Only the row this Mac made; a server connection (token in Vault) is left alone.
+        call("DELETE", f"{url}/rest/v1/chain_connections?chain=eq.{chain}&source=eq.mac-helper", key, token, prefer="return=minimal")
+    else:
+        call("POST", f"{url}/rest/v1/rpc/matkassa_report_chain_status", key, token,
+             {"p_chain": chain, "p_status": status, "p_synced": "--synced" in argv, "p_error": err, "p_source": "mac-helper"})
+    print(f"{chain}: status «{status}» sendt til kontoen.", file=sys.stderr)
+
+
 def main(argv):
-    if not argv or argv[0] not in ("login", "logout", "status", "upload", "connect"):
+    if not argv or argv[0] not in ("login", "logout", "status", "upload", "connect", "report"):
         print(__doc__, file=sys.stderr)
         return 1
     url, key = config()
@@ -158,6 +176,8 @@ def main(argv):
         if len(argv) < 2:
             raise SystemExit("Bruk: python3 ingest/cloud.py connect trumf|rema")
         connect(url, key, argv[1])
+    elif cmd == "report":
+        report(url, key, argv[1:])
     return 0
 
 

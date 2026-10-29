@@ -85,6 +85,11 @@ class Fake(http.server.BaseHTTPRequestHandler):
                 return self.send(400, '{"error_description":"Invalid Refresh Token"}')
             s.refresh = f"FAKE-RT-{len(s.log)}"
             return self.send(200, json.dumps({"access_token": "FAKE-AT", "refresh_token": s.refresh, "expires_in": 3600}))
+        if self.path.startswith("/rest/v1/rpc/matkassa_report_chain_status"):
+            if self.headers.get("Authorization") != "Bearer FAKE-AT":
+                return self.send(401, '{"message":"JWT"}')
+            s.reports.append(json.loads(body))
+            return self.send(200, "null")
         if self.path.startswith("/rest/v1/receipts"):
             if self.headers.get("Authorization") != "Bearer FAKE-AT":
                 return self.send(401, '{"message":"JWT"}')
@@ -92,10 +97,17 @@ class Fake(http.server.BaseHTTPRequestHandler):
             return self.send(201, "")
         self.send(404, "{}")
 
+    def do_DELETE(self):
+        self.server.log.append(("DELETE", self.path, dict(self.headers), ""))
+        if self.headers.get("Authorization") != "Bearer FAKE-AT":
+            return self.send(401, '{"message":"JWT"}')
+        return self.send(204, "")
+
 
 def server():
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     srv.log, srv.valid_sessions, srv.list_calls, srv.refresh, srv.uploaded = [], {"FAKE-SESSION-1"}, 0, "FAKE-RT-0", []
+    srv.reports = []
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
@@ -195,6 +207,15 @@ try:
     write_state(home, "FAKE-EXPIRED")
     r = subprocess.run(["bash", "ingest/sync.sh"], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
     ok(r.returncode != 0 and "trumf-login.mjs" in r.stderr, "sync.sh: an expired Trumf login fails loudly with the fix", r.stderr[-200:])
+    # ---------- cloud.py report: chain status from this Mac, no token ----------
+    r = subprocess.run([sys.executable, "ingest/cloud.py", "report", "rema", "connected", "--synced"], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+    ok(r.returncode == 0 and srv.reports and srv.reports[-1] == {"p_chain": "rema", "p_status": "connected", "p_synced": True, "p_error": None, "p_source": "mac-helper"}, "cloud.py report: REMA status goes to the account (RPC), as mac-helper", (r.stderr + str(srv.reports))[-300:])
+    ok(not any("refresh_token" in json.dumps(x) or "FAKE-REMA" in json.dumps(x) for x in srv.reports), "cloud.py report: no chain token is sent")
+    r = subprocess.run([sys.executable, "ingest/cloud.py", "report", "rema", "disconnected"], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+    dels = [x for x in srv.log if x[0] == "DELETE"]
+    ok(r.returncode == 0 and dels and "chain=eq.rema" in dels[-1][1] and "source=eq.mac-helper" in dels[-1][1], "cloud.py report disconnected: deletes only the Mac's own REMA status row", dels[-1][1] if dels else r.stderr[-200:])
+    r = subprocess.run([sys.executable, "ingest/cloud.py", "report", "rema", "hacked"], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+    ok(r.returncode != 0, "cloud.py report: an unknown status is refused locally")
     os.remove(sess)
     r = subprocess.run(["bash", "ingest/sync.sh"], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
     ok(r.returncode == 1 and "cloud.py login" in r.stderr, "sync.sh: no account and no repo → says what to do")

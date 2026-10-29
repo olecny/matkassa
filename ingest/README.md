@@ -13,6 +13,7 @@ Skript som kjører på Mac-en (Jarvis-maskinen) og lager `spending.json`, som du
 | `cloud.py` | Mac → **din Matkassa-konto** (Supabase): `login`, `upload`, `connect trumf|rema`, `status`. Se [SUPABASE.md](../SUPABASE.md) |
 | `sync.sh` | Henter fra REMA og/eller Trumf (det du har logget inn på), slår sammen, og leverer til kontoen din og/eller **ditt eget private** datarepo |
 | `launchd/` | Kjører `sync.sh` automatisk hver søndag kl. 20:00 (se under) |
+| `helper.py` | **REMA-knappen**: liten tjener på `127.0.0.1:47321` som lar appen (Mer → Kjeder → *Koble til REMA*) starte REMAs egen innlogging og `sync.sh` på denne Mac-en. Se *REMA-knappen* under |
 | Trumf-innsyn | Kan fortsatt importeres direkte i appen (JSON); dobbelt med `trumf.py` slås sammen |
 | Coop | **Ingen dokumentert API** for egne kvitteringer, så ingen skraper (vi dekoder ikke Coop-appens trafikk). Bestill innsyn: coop.no → Min side → *Bestill innsyn*, og importer CSV/JSON i appen. Formatet er gjettet (FAKE-eksempler i `test/fake/`) og må sjekkes på første ekte fil |
 | Kvitteringsfoto/PDF | Fase 3: Claude Code tolker bilder til samme format |
@@ -47,6 +48,47 @@ Endepunkter (base `https://api.rema.no`, header `Ocp-Apim-Subscription-Key` + `A
 | `GET /v1/bella/transaction/v2/rows/{id}` | Varelinjer: `productDescription`, `prodtxt3` (GTIN), `productGroupDescription` (REMAs varegruppe), `amount`, `discount`, `deposit`, `pieces`, `volume`, `unit` |
 
 Dette er et **uoffisielt** API mot din egen konto. Det kan endres uten varsel. Kjør sjelden (f.eks. én gang i uka).
+
+## REMA-knappen (`helper.py`)
+
+En nettside kan ikke starte programmer på Mac-en. Derfor snakker knappen **Mer → Kjeder → Koble til REMA** med en
+liten hjelper som bare denne Mac-en kan nå. Bare standardbiblioteket (Python 3.9+), og rema1000-cli (`rema`).
+
+```bash
+ingest/launchd/install-helper.sh     # installer (starter ved innlogging, startes på nytt hvis den stopper) + viser koden
+python3 ingest/helper.py pair        # vis parkoblingskoden igjen     (--new: lag en ny, den gamle slutter å virke)
+ingest/launchd/uninstall-helper.sh   # fjern (--forget: slett også koden og statusen i ~/.matkassa)
+tail ingest/logs/helper.log          # logg: bare tid, metode, sti og statuskode
+```
+Første gang: åpne Matkassa på Mac-en → Mer → Kjeder → **Koble til REMA** → lim inn koden fra Terminal (én gang) →
+**Koble til REMA** igjen. REMAs egen innloggingsside åpnes i nettleseren; logg inn selv (telefonnummer, reCAPTCHA, kode).
+Når den er ferdig, står det **Koblet**, og første synk starter av seg selv. Senere: **Synk nå** og **Koble fra**.
+Chrome kan spørre om siden får «koble til enheter på det lokale nettverket»: svar ja (det gjelder bare 127.0.0.1).
+
+| Endepunkt | Hva |
+|---|---|
+| `GET /status` | `{helper, version, rema: {state, lastSync, lastSyncOk, message}, syncing}`; `state` = `disconnected`, `connecting`, `connected`, `expired` |
+| `POST /rema/login` | starter `rema auth login` (stdin lukket, utdata kastes); `connected` når den avslutter med 0 og `~/.rema1000/tokens.json` finnes |
+| `POST /rema/logout` | `rema auth logout` (= *Koble fra*: sletter REMA-økta på Mac-en) |
+| `POST /sync` | kjører `sync.sh` i bakgrunnen (én om gangen, ellers 409). Feiler REMA med 400/401/403 eller ugyldig token, blir status `expired` |
+
+**Sikkerhet:** lytter bare på `127.0.0.1` og avviser andre `Host`-navn (DNS-rebinding). Alle kall må ha
+`Authorization: Bearer <parkoblingskode>` (16 tegn, ca. 78 bit, `~/.matkassa/helper-pair.json`, 0600); 10 feil koder
+på et minutt gir 429. Har kallet en `Origin`, må den være GitHub Pages-adressen til eieren av repoet (fra `git remote`, f.eks.
+`https://<bruker>.github.io`; overstyr med `MATKASSA_APP_ORIGIN`), ellers 403 uten CORS-hoder. Svar og logg inneholder aldri
+tokens: REMA-økta blir i `~/.rema1000/`, statusfila `~/.matkassa/helper-state.json` har bare tider og meldinger, og
+alt token-lignende i synk-utdata maskeres. Er Mac-en logget inn på Matkassa-kontoen (`cloud.py login`), sender
+hjelperen bare **statusen** dit (`cloud.py report rema connected|expired|disconnected`), så telefonen kan vise
+«Koblet via Mac-en».
+
+**Innloggings-leverandør (for App Store senere):** appen bruker `js/chains/index.js`: knappen, statusene, pollingen og
+Supabase-statusen er felles, og bare *leverandøren* er plattformavhengig. I dag: `mac-helper` (denne hjelperen) på
+Mac og `unsupported` («Gjøres fra Mac-en») på telefon. En Capacitor-app på iPhone legger til en leverandør med samme
+metoder (`status`, `login`, `sync`, `disconnect`; innlogging i en nettleser inne i appen, økta i nøkkelringen) og
+returnerer den fra `pickProvider()`. Ingenting annet må endres.
+
+Tester: `python3 test/helper.test.py` (ekte hjelper på en tilfeldig port, falsk `rema`, falsk `sync.sh`, HOME i en
+temp-mappe; ekte rema1000-cli og `~/.rema1000` røres aldri).
 
 ## Trumf (`trumf-login.mjs` + `trumf.py`)
 

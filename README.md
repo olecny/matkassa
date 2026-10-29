@@ -42,8 +42,9 @@ node test/unit.test.mjs          # enhetstester (import, summer, profil, EAN, fl
 node test/e2e.mjs                # headless Chrome 390×844 over CDP, falskt nett fra test/fake/ → test/tmp/e2e-report.md
 node test/e2e.mjs --live         # samme mot ekte Tjek-tilbud (bare lesing)
 test/privacy.sh                  # ingen tokens/persondata i det offentlige repoet
-test/rls.sh                      # Supabase-schema + RLS på en midlertidig lokal Postgres (brew install postgresql@17)
+test/rls.sh                      # Supabase-schema + RLS + FAKE-seed (to ganger) på en midlertidig lokal Postgres (brew install postgresql@17)
 python3 test/ingest.test.py      # trumf.py, merge.py, cloud.py og sync.sh mot falsk trumf.no + falsk Supabase
+python3 test/helper.test.py      # REMA-hjelperen (ingest/helper.py) med falsk rema-binær; ekte ~/.rema1000 røres aldri
 node test/trumf-login.test.mjs   # trumf-login.mjs mot en falsk innloggingsside (headless)
 node test/functions.test.mjs     # Edge Functions under Node med falske tjenester
 ```

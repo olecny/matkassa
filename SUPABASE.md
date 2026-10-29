@@ -2,14 +2,48 @@
 
 Matkassa virker fullt uten konto (alt ligger på telefonen). Med en **Matkassa-konto** synkes kvitteringer,
 handleliste, kategorier og regler mellom enhetene dine, og Mac-en (eller senere serveren) leverer kvitteringene rett
-inn i kontoen din, **uten GitHub-repo og uten GitHub-nøkkel**. Begge appene (Matkassa og Matkassa Premium) kan bruke
-**samme** Supabase-prosjekt og samme konto.
+inn i kontoen din, **uten GitHub-repo og uten GitHub-nøkkel**. Begge appene (Matkassa og Matkassa Premium) bruker
+**samme** Supabase-prosjekt og samme konto. GitHub har bare skjemaet, reglene og FAKE-testbrukere; ekte brukerdata
+ligger bare i Supabase.
 
 Gratis: Supabase *Free plan* (500 MB database, 50 000 brukere, Edge Functions inkludert). Ingen betalingskort trengs.
 
-> **Status:** schema + RLS er testet på lokal Postgres (`test/rls.sh`, 11 sjekker). Appens innlogging og synk er
-> testet mot en falsk Supabase (e2e). Edge Functions er testet under Node med falske tjenester. **Ingenting er kjørt mot
-> et ekte Supabase-prosjekt ennå**, fordi det krever at du lager kontoen selv. Ta stegene under i rekkefølge.
+## Sjekkliste for i morgen (ca. 15 minutter)
+
+Kryss av underveis. Detaljer og skjermnavn står i stegene lenger ned.
+
+- [ ] **1. Prosjekt (3 min)** – supabase.com → logg inn → *New project* `matkassa`, plan **Free**,
+      region **North EU (Stockholm)**, sterkt databasepassord i passordbehandleren. Vent til det er klart. (Steg 1)
+- [ ] **2. Tabeller og tilgangsregler (3 min)** – **SQL Editor** → *New query*: lim inn og **Run** disse tre filene,
+      én om gangen, i denne rekkefølgen (alle tåler å kjøres på nytt):
+  1. `supabase/migrations/20261024120000_matkassa_sync.sql`
+  2. `supabase/migrations/20261024120100_chain_connections.sql`
+  3. `supabase/migrations/20261029120000_profiles_and_chain_status.sql` (profiler + REMA-status fra Mac-en)
+
+      Sjekk i **Table Editor**: `receipts`, `list_items`, `categories`, `rules`, `settings`, `chain_connections`,
+      `profiles`, alle med **RLS enabled**. (Steg 2)
+- [ ] **3. (Valgfritt, 1 min) FAKE-testdata** – kjør `supabase/seed.sql` i SQL Editor. Gir 3 FAKE-brukere
+      (`fake-anna-FAKE@example.invalid` osv., passord `FAKE-testpassord-123`) med FAKE-kvitteringer, så du kan se
+      hvordan det ser ut i dashboardet. Fjern dem igjen før andre får bruke det:
+      `delete from auth.users where email like '%-FAKE@example.invalid';`
+- [ ] **4. Innlogging (3 min)** – **Authentication → URL Configuration**: *Site URL* `https://olecny.github.io/matkassa/`,
+      *Redirect URLs*: `https://olecny.github.io/matkassa/` og `https://olecny.github.io/matkassa-premium/`. (Steg 3)
+- [ ] **5. Koble appene (2 min)** – **Project Settings → API Keys**: kopier *Project URL* og *anon public* /
+      *publishable* key, og gi dem til Jarvis/David (eller lim dem inn i `js/cloud-config.js` i begge repoene).
+      **Aldri** service_role/secret-nøkkelen. Jarvis deployer. (Steg 4)
+- [ ] **6. Din konto (2 min)** – i appen: **Mer → Konto → Opprett konto**, trykk lenken i e-posten, logg inn. (Steg 5)
+- [ ] **7. Mac-en (1 min)** – `python3 ingest/cloud.py login` og `python3 ingest/cloud.py status`. (Steg 6)
+- [ ] **8. Steng døra (30 s)** – slå av **Allow new users to sign up** når du (og testerne) har konto. (Steg 3.3)
+
+Etterpå, når du vil: installer REMA-hjelperen og trykk **Koble til REMA** (se `ingest/README.md`, *REMA-knappen*),
+og serverhentingen i steg 8 (valgfritt).
+
+> **Status:** schema + RLS + seed er testet på lokal Postgres (`test/rls.sh`: migreringene og seed kjøres to ganger,
+> deretter 20 RLS-sjekker, blant dem at hver FAKE-bruker bare ser sin egen profil, sine kvitteringer og sin
+> kjedestatus). Appens innlogging og synk er testet mot en falsk Supabase (e2e). Edge Functions er testet under Node
+> med falske tjenester. **Ingenting er kjørt mot et ekte Supabase-prosjekt ennå**, fordi det krever at du lager
+> kontoen selv. Usikkert til første ekte kjøring: at `seed.sql` sine FAKE-brukere kan logge inn (Supabase sin
+> `auth.users` har flere kolonner enn testen vår; feiler det, hopp over steg 3, det påvirker ingenting annet).
 
 ## Hvilke verdier går hvor
 
@@ -35,8 +69,14 @@ innstillingene, og databasen avviser innstillinger som inneholder `sync` eller `
 1. Venstremenyen → **SQL Editor** → *New query*.
 2. Lim inn hele `supabase/migrations/20261024120000_matkassa_sync.sql` → **Run**. Skal gi «Success. No rows returned».
 3. Ny query: lim inn `supabase/migrations/20261024120100_chain_connections.sql` → **Run**.
-4. Sjekk: **Table Editor** viser `receipts`, `list_items`, `categories`, `rules`, `settings`, `chain_connections`,
-   alle merket **RLS enabled**. (Begge filene kan kjøres på nytt uten skade.)
+4. Ny query: lim inn `supabase/migrations/20261029120000_profiles_and_chain_status.sql` → **Run**.
+5. Sjekk: **Table Editor** viser `receipts`, `list_items`, `categories`, `rules`, `settings`, `chain_connections`,
+   `profiles`, alle merket **RLS enabled**. (Alle filene kan kjøres på nytt uten skade.)
+
+**Hva `profiles` er:** én rad per konto, laget automatisk når kontoen opprettes: visningsnavn, valgte kjeder og
+når kontoen ble laget. Ingen e-post, telefon eller adresse (de ligger bare i Supabase sin egen `auth.users`).
+**`chain_connections.source`:** `server` (økta ligger kryptert i Vault for serverhentingen), `mac-helper` (REMA-knappen:
+økta ligger bare på Mac-en, kontoen får bare statusen «koblet/utløpt/hentet»), `ios` (en senere iPhone-app).
 
 ## 3. Innlogging (Authentication)
 1. **Authentication → Sign In / Providers → Email**: på (standard). La **Confirm email** stå på.
@@ -85,7 +125,7 @@ GitHub-nøkkelen i appen (*Mer → Synk fra Mac → Glem nøkkel*) og linjen i `
 node ingest/trumf-login.mjs          # Chrome åpnes på trumf.no: logg inn selv (telefon, passord, SMS-kode)
 python3 ingest/trumf.py --check      # «Trumf-økta virker.»
 python3 ingest/trumf.py --out /tmp/trumf-test.json   # prøvehenting, se antall i utskriften
-rema1000 login                       # REMA (rema1000-cli), har du gjort før
+rema auth login                      # REMA (rema1000-cli), eller bruk knappen Mer → Kjeder → Koble til REMA
 ```
 Når Trumf-økta går ut (omtrent 3–12 måneder), sier den ukentlige jobben fra (macOS-varsel + `ingest/logs/last-run.txt`)
 med kommandoen over.
@@ -108,7 +148,7 @@ select vault.create_secret('<samme CRON_SECRET>', 'matkassa_cron_secret');
 Kjør deretter `supabase/schedule/weekly_pull.sql` (søndag 18:00 UTC). Koble til kjedene fra Mac-en:
 ```bash
 python3 ingest/cloud.py connect trumf     # etter trumf-login.mjs
-python3 ingest/cloud.py connect rema      # etter rema1000 login
+python3 ingest/cloud.py connect rema      # etter rema auth login
 ```
 Økta lagres **kryptert i Vault**, kan bare leses av serveren, sendes aldri tilbake til noen app, og **Koble fra** i
 appen sletter den. Prøv én gang for hånd: `curl -X POST https://<ref>.supabase.co/functions/v1/fetch-receipts -H "x-cron-secret: <verdien>"`
@@ -128,6 +168,12 @@ Målet var: logg inn i Matkassa → *Koble til REMA* → kort innlogging → fer
   trafikk, og det gjør vi ikke. Bruk **innsyn**: coop.no → Min side → *Bestill innsyn*, og importer fila
   (CSV/JSON) under *Forbruk → Importer fil*. Formatet er ikke offentlig, så importen er laget for vanlige varianter
   og må sjekkes på din første ekte fil.
+
+**REMA-knappen (v0.7):** På Mac-en har appen nå **Mer → Kjeder → Koble til REMA**. Knappen ber en liten hjelper
+på Mac-en (`ingest/helper.py`, bare 127.0.0.1) starte REMAs *egen* innlogging i nettleseren; du logger inn selv der,
+med reCAPTCHA og alt. Økta blir liggende på Mac-en (`~/.rema1000/`), og kontoen får bare statusen. Se
+`ingest/README.md`. En senere iPhone-app kan bytte ut hjelperen med innlogging inne i appen (iPhone-nøkkelringen) uten
+å endre knappen, statusen eller synken (`js/chains/index.js`).
 
 Beste ærlige løsning: **én innlogging per kjede på Mac-en** (du logger inn selv, i en vanlig nettleser/CLI), deretter
 går resten av seg selv, enten via Mac-en hver søndag (steg 6–7) eller via serveren (steg 8). I appen viser
