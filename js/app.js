@@ -263,9 +263,12 @@ function filteredOffers() {
     fordeg: hasProfile() ? (a, b) => (b.fit || 0) - (a.fit || 0) || discount(b.o) - discount(a.o) : null,
   }[state.sort];
   if (by) list = [...list].sort(by);
-  else if (!qTokens.length) list = [...list].sort((a, b) => a.o.chain.localeCompare(b.o.chain, 'nb'));
+  // nothing to go on (no receipts, no search, no sort): food first, sweets and fizzy drinks last (Linn, Hege)
+  else if (!qTokens.length) list = [...list].sort((a, b) => foodRank(a.cat) - foodRank(b.cat) || a.o.chain.localeCompare(b.o.chain, 'nb'));
   return list;
 }
+const FOOD_ORDER = ['frukt', 'meieri', 'kjott', 'fisk', 'brod', 'palegg', 'ferdigmat', 'frossen', 'torr', 'drikke', 'snacks'];
+const foodRank = (cat) => { const i = FOOD_ORDER.indexOf(cat); return i < 0 ? FOOD_ORDER.length : i; };
 const discount = (o) => (o.prePrice && o.prePrice > o.price ? (o.prePrice - o.price) / o.prePrice : 0);
 
 /** Word match: every query token must hit a word in the title (whole word, or start/end of a compound) or the description. */
@@ -1108,9 +1111,18 @@ function accountCard() {
 
 const CONNECT_HELP = {
   trumf: 'Trumf kan ikke kobles til inne i appen: innloggingen (telefon, passord og SMS-kode) skjer bare på trumf.no, og Trumf har ingen innlogging for andre apper. Gjør det i stedet én gang på Mac-en: kjør «node ingest/trumf-login.mjs», logg inn hos Trumf i vinduet som åpnes, og lukk det. Deretter hentes kvitteringene hver søndag.',
-  rema: 'REMA kobles til fra Matkassa på Mac-en: Mer → Kvitteringer fra kjedene → Koble til REMA. Du logger inn hos REMA selv, i REMAs eget innloggingsvindu, og kvitteringene hentes deretter. På telefonen kan det ikke gjøres, fordi REMAs innlogging er beskyttet med reCAPTCHA, og det omgår vi ikke.',
+  rema: 'REMA kobles til fra en Mac én gang: åpne Matkassa der og trykk «Koble til REMA». Du logger inn hos REMA selv, i REMAs eget vindu, og passordet ditt lagres ikke hos oss. Etterpå kommer kvitteringene av seg selv.',
   coop: 'Coop har ingen åpen eller dokumentert måte å hente egne kvitteringer på. Bestill innsyn i stedet: coop.no → Min side → Bestill innsyn. Når du får fila (JSON eller CSV), importer den under Forbruk → Importer fil.',
 };
+
+/* "Send lenke til Mac-en" (REMA on a phone): the share sheet, else copy the link. Nothing is sent by us. */
+async function sendMacLink() {
+  const url = location.origin + location.pathname;
+  const text = 'Åpne Matkassa på Mac-en for å koble til REMA (én gang):';
+  try { if (navigator.share) { await navigator.share({ title: 'Matkassa – koble til REMA', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(url); }
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-action="send-mac-link"]')) sendMacLink(); });
 
 /* ---------- Koble til REMA (Mer). The login provider (Mac helper today, an iOS app later) is chosen in
    js/chains/index.js; this part only shows the status and calls the connection's actions. ---------- */
@@ -1152,7 +1164,8 @@ function chainCard() {
   let body = '';
   if (s.state === STATES.UNSUPPORTED) {
     const c = (cloudState.connections || []).find((x) => x.chain === 'rema');
-    body = `<p class="hint">REMA kobles til fra Matkassa på Mac-en (Mer). REMAs innlogging er beskyttet med reCAPTCHA og må skje i nettleseren der, og det omgår vi ikke. Kvitteringene kommer så hit via kontoen din eller synken fra Mac-en.</p>
+    body = `<p class="hint">REMA kobles til fra en Mac én gang. Etterpå kommer kvitteringene av seg selv.</p>
+      <div class="actions"><button class="btn small" type="button" data-action="send-mac-link">Send lenke til Mac-en</button></div>
       ${c ? `<p class="hint">Koblet via Mac-en${c.last_fetch_at ? ` · hentet ${esc(timeFmt.format(new Date(c.last_fetch_at)))}` : ''}</p>` : ''}`;
   } else if (s.state === STATES.NOT_INSTALLED) {
     body = `<p class="hint">For å koble til REMA trenger Mac-en en liten hjelper som bare denne Mac-en kan nå. Slik installerer du den (én gang):</p>

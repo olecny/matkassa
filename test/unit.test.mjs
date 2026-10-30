@@ -418,4 +418,17 @@ ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('
   ok(sorted.map((o) => o.unit || '-').join() === 'kg,kg,l,stk,-' && sorted[0].unitPrice === 40, 'Laveste pris: by unit price within kg, l and stk, each on its own');
 }
 
+/* ---------- Kundeprøve 30.10 punkt 7: kategorier, duplikater og kampanjenavn (FAKE) ---------- */
+{
+  const T = await import('../js/tjek.js');
+  const C = await import('../js/categories.js');
+  const offers = [{ id: 'p1', chainId: 'FAKE-B', title: 'Persimon', price: 10 }, { id: 'p2', chainId: 'FAKE-B', title: 'Persimon/kaki', price: 10 },
+    { id: 'p3', chainId: 'FAKE-K', title: 'Persimon', price: 10 }, { id: 'm1', chainId: 'FAKE-B', title: 'Tine helmelk', price: 24.9 }, { id: 'm2', chainId: 'FAKE-B', title: 'Tine lettmelk', price: 24.9 }];
+  T.dedupeOffers(offers);
+  ok(offers.map((o) => o.id).join() === 'p2,p3,m1,m2', 'Hege: «Persimon» and «Persimon/kaki» from one chain at one price are one offer; other chains and other milks stay', offers.map((o) => o.id).join());
+  ok(T.isNonProduct('Kronemarked') && T.isNonProduct('Ukens kupp!') && !T.isNonProduct('Smågodt') && !T.isNonProduct('Kronesis'), 'Hege: campaign names without a product (Kronemarked) are hidden');
+  const cats = ['Persimon', 'Persimon/kaki', 'Kinakål', 'Surkål', 'Rødkål', 'Toro Bali kylling', 'Kyllingfilet'].map((t) => C.keywordCategory(t));
+  ok(cats.join() === 'frukt,frukt,frukt,frukt,frukt,torr,kjott', 'Hege: persimon, kinakål, surkål → Frukt/grønt; Toro Bali kylling → Tørrvarer, not Kjøtt', cats.join());
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');

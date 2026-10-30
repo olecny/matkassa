@@ -32,7 +32,7 @@ const KEYWORDS = {
     reker scampi fiskekaker fiskeboller fiskepudding fiskegrateng makrell sild hamburger burger burgere
     salami servelat leverpostei pålegg kjøttboller =gilde =prior nortura nakkekoteletter svinenakke
     karbonader gryterett kyllingpølse hvalbiff reinsdyr elg hjort andebryst tunfiskbiff`,
-  frukt: `=chili gresskar spisskål avocado =dadler rosiner oliven =bær frukt grønt grønnsaker eple epler banan bananer appelsin appelsiner mandarin mandariner klementin
+  frukt: `persimon =kaki sharonfrukt granateple kinakål surkål rødkål hvitkål savoykål =chili gresskar spisskål avocado =dadler rosiner oliven =bær frukt grønt grønnsaker eple epler banan bananer appelsin appelsiner mandarin mandariner klementin
     klementiner sitron sitroner =lime druer pære pærer avokado mango ananas jordbær bringebær blåbær melon
     vannmelon tomat tomater cherrytomater agurk paprika salat isberg spinat brokkoli blomkål gulrot gulrøtter
     =løk rødløk hvitløk vårløk potet poteter søtpotet =kål hodekål rosenkål grønnkål purre sopp champignon
@@ -96,10 +96,13 @@ export function tokens(text) {
 }
 
 /** Keyword-map category id for a text, or null. */
+const BRAND_CAT = { toro: 'torr', knorr: 'torr' };
 export function keywordCategory(text) {
   const norm = normalize(text);
   if (!norm) return null;
   const words = norm.split(/[ \-]+/);
+  // A brand that only makes one kind of thing wins over the dish word: "Toro Bali kylling" is a dry mix, not meat.
+  for (const w of words) if (BRAND_CAT[w]) return BRAND_CAT[w];
   for (const { cat, kw, whole, phrase } of INDEX) {
     if (phrase) {
       if ((' ' + norm + ' ').includes(' ' + kw)) return cat;

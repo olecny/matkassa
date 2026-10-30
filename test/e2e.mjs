@@ -595,7 +595,7 @@ async function cloudTests() {
       check(await evaluate(`return /Tilkoblet/.test(document.querySelector('[data-conn="trumf"]').textContent) && !!document.querySelector('[data-disconnect="trumf"]') && !!document.querySelector('[data-connect="rema"]');`), 'connect: Mer shows Trumf connected, REMA not');
       check(!supa.log.some((r) => /chain_connections\?select=[^&]*secret/.test(r.path)), 'connect: the app never asks for the secret');
       await click('[data-connect="rema"]');
-      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /reCAPTCHA/.test(document.querySelector('#chain-connect').textContent)`, 5000), 'connect: REMA "Koble til" leads to the REMA card, which explains it is done on the Mac (no bypassing reCAPTCHA)');
+      check(await waitFor(`/Gjøres fra Mac-en/.test(document.querySelector('#rema-state')?.textContent || '') && /kobles til fra en Mac én gang\. Etterpå kommer kvitteringene av seg selv/.test(document.querySelector('#chain-connect').textContent) && !/reCAPTCHA|Mer → Kjeder/.test(document.querySelector('#chain-connect').textContent) && !!document.querySelector('#chain-connect [data-action="send-mac-link"]')`, 5000), 'connect: REMA "Koble til" leads to the REMA card, which explains it is done on the Mac (no bypassing reCAPTCHA)');
       await click('[data-disconnect="trumf"]');
       await sleep(500);
       check(!supa.tables.chain_connections.some((r) => r.user_id === A.id && r.chain === 'trumf'), '"Koble fra" deletes the connection (and with it the stored token)');
