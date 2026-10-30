@@ -334,7 +334,7 @@ ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('
   ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }), 'chains: an iPhone is a phone');
   ok(isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 5 }), 'chains: an iPad (Mac UA + touch) counts as mobile');
   ok(!isMobileDevice({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit', maxTouchPoints: 0 }), 'chains: a Mac is not a phone');
-  ok(pickProvider({ nav: { userAgent: 'iPhone' } }).id === 'unsupported' && pickProvider({ nav: { userAgent: 'Macintosh' }, storage: mem() }).id === 'mac-helper', 'chains: phone → "Gjøres fra Mac-en", Mac → helper');
+  ok(pickProvider({ nav: { userAgent: 'iPhone' } }).id === 'unsupported' && pickProvider({ nav: { userAgent: 'Macintosh', platform: 'MacIntel' }, storage: mem() }).id === 'mac-helper', 'chains: phone → "Gjøres fra Mac-en", Mac → helper');
   ok(REMA.id === 'rema' && /^#[0-9a-f]{6}$/i.test(REMA.badge.bg) && !/logo|\.png|\.svg|http/i.test(JSON.stringify(REMA)), 'chains: REMA is a text badge (name + colours), no logo file or URL');
 
   const phone = createConnection(REMA, pickProvider({ nav: { userAgent: 'iPhone' } }));
@@ -458,6 +458,17 @@ ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('
   ok(best.has('coop') && best.has('rema') && best.size === 2, 'Hege r2: hvetemel 9,95 kr/kg in two chains: both get «Beste tilbud»', [...best].join());
 }
 
+{ // round 3: UA + platform + touch; only a clear Mac desktop gets the helper
+  const { pickProvider: PP } = await import('../js/chains/index.js');
+  const st = { getItem: () => null, setItem() {}, removeItem() {} };
+  const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36';
+  const P = (nav) => PP({ nav, storage: st, win: {} }).id;
+  ok(P({ userAgent: mac, platform: 'MacIntel', maxTouchPoints: 0 }) === 'mac-helper', 'round 3: a Mac desktop (Mac UA, MacIntel, no touch) gets the helper');
+  ok(P({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' }) === 'unsupported' && P({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', platform: 'MacIntel' }) === 'unsupported', 'round 3: an iPhone UA, with or without a platform, gets the phone state');
+  ok(P({ userAgent: mac }) === 'unsupported' && P({ userAgent: mac, platform: 'iPhone' }) === 'unsupported' && P({ userAgent: mac, platform: 'Linux armv8l' }) === 'unsupported', 'round 3: a Mac UA without a Mac platform gets the phone state');
+  ok(P({ userAgent: mac, platform: 'MacIntel', maxTouchPoints: 1 }) === 'unsupported' && P({ userAgent: mac, platform: 'MacIntel', userAgentData: { mobile: true, platform: 'macOS' } }) === 'unsupported', 'round 3: any touch point or a mobile UA hint gets the phone state');
+}
+
 { // Maria 0.7.1-rc1: N2 (flour), N3 (campaign names, «Kjøp 3, betal for 2»), N4 («ca.» weights)
   const T = await import('../js/tjek.js');
   const it = (id, unitPrice, price) => ({ o: { id, unitPrice, unit: 'kg', price }, cat: 'torr' });
@@ -478,7 +489,7 @@ ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('
 
 {
   const { pickProvider } = await import('../js/chains/index.js');
-  const P = (ua, tp = 0) => pickProvider({ nav: { userAgent: ua, maxTouchPoints: tp }, storage: { getItem: () => null, setItem() {}, removeItem() {} }, win: {} }).id;
+  const P = (ua, tp = 0) => pickProvider({ nav: { userAgent: ua, maxTouchPoints: tp, platform: 'MacIntel' }, storage: { getItem: () => null, setItem() {}, removeItem() {} }, win: {} }).id;
   ok(P('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', 5) === 'unsupported' && P('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 5) === 'unsupported' && P('Mozilla/5.0 (Windows NT 10.0)') === 'unsupported' && P('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)') === 'mac-helper',
     'Linn r2: only a Mac desktop gets the helper; iPhone, iPad and Windows get «Send lenke til Mac-en»');
 }
