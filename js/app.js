@@ -269,7 +269,9 @@ function filteredOffers() {
 }
 const FOOD_ORDER = ['frukt', 'meieri', 'kjott', 'fisk', 'brod', 'palegg', 'ferdigmat', 'frossen', 'torr', 'drikke', 'snacks'];
 const foodRank = (cat) => { const i = FOOD_ORDER.indexOf(cat); return i < 0 ? FOOD_ORDER.length : i; };
-const discount = (o) => (o.prePrice && o.prePrice > o.price ? (o.prePrice - o.price) / o.prePrice : 0);
+// For multi-buy the deal is what one item really costs ("3 for 2": 59,90 → 39,93 a piece), not the single price (Maria M1).
+const dealPrice = (o) => (o.multi && o.perPiece ? o.perPiece : o.price);
+const discount = (o) => (o.prePrice && o.prePrice > dealPrice(o) ? (o.prePrice - dealPrice(o)) / o.prePrice : 0);
 
 /** Word match: every query token must hit a word in the title (whole word, or start/end of a compound) or the description. */
 function matchScore(qTokens, x) {
@@ -304,10 +306,10 @@ function validText(o) {
 
 function unitText(o) {
   if (!o.unitPrice) return '';
-  return `${o.unitFrom ? 'fra ' : ''}${kr(o.unitPrice)}/${o.unit}`;
+  return `${o.unitFrom ? 'fra ' : ''}${o.multi && o.unit === 'stk' ? 'snitt ' : ''}${kr(o.unitPrice)}/${o.unit}`;
 }
 /** The big price: "4 for 50 kr" for multi-buy, else the price. */
-const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor}` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
+const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor} · ${kr(o.price)}/stk` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
 
 function inList(offerId) {
   return state.list.some((i) => i.offer && i.offer.id === offerId && !i.done);
@@ -368,7 +370,7 @@ function renderChips() {
   const counts = new Map();
   for (const x of activeOffers()) if (!sel.size || sel.has(x.o.chainId)) counts.set(x.cat, (counts.get(x.cat) || 0) + 1);
   $('#cat-chips').innerHTML =
-    `<button class="chip" type="button" data-cat="" aria-pressed="${!state.cat}">Alle varer</button>` +
+    `<button class="chip" type="button" data-cat="" aria-pressed="${!state.cat}">Alle kategorier</button>` +
     state.categories
       .filter((c) => counts.get(c.id))
       .map((c) => `<button class="chip" type="button" data-cat="${esc(c.id)}" aria-pressed="${state.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`)
@@ -1120,7 +1122,7 @@ async function sendMacLink() {
   const url = location.origin + location.pathname;
   const text = 'Åpne Matkassa på Mac-en for å koble til REMA (én gang):';
   try { if (navigator.share) { await navigator.share({ title: 'Matkassa – koble til REMA', text, url }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
-  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(url); }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lenken er kopiert. Lim den inn i en melding eller e-post til deg selv.'); } catch { toast(`Åpne denne adressen på Mac-en: ${url}`); } // never a bare URL (Maria L6)
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-action="send-mac-link"]')) sendMacLink(); });
 
