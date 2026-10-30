@@ -1,5 +1,5 @@
 import * as db from './db.js';
-import { fetchOffers, AREAS, DEFAULT_AREA } from './tjek.js';
+import { fetchOffers, AREAS, DEFAULT_AREA, byUnitPrice } from './tjek.js';
 import { DEFAULT_CATEGORIES, makeClassifier, normalize, tokens } from './categories.js';
 import { buildProfile, scoreOffer, normEan } from './profile.js';
 import { parseExtraOffers, mergeExtraOffers, eanCoverage } from './extra-offers.js';
@@ -256,8 +256,9 @@ function filteredOffers() {
       .map((r) => r.x);
   }
   const by = {
-    pris: (a, b) => a.o.price - b.o.price,
-    enhet: (a, b) => (a.o.unitPrice ?? 1e9) - (b.o.unitPrice ?? 1e9),
+    // "Laveste pris" compares like with like: kr/kg, then kr/l, then kr/stk (a 10 kr chewing gum is not cheap food)
+    pris: (a, b) => byUnitPrice(a.o, b.o),
+    enhet: (a, b) => byUnitPrice(a.o, b.o),
     rabatt: (a, b) => discount(b.o) - discount(a.o),
     fordeg: hasProfile() ? (a, b) => (b.fit || 0) - (a.fit || 0) || discount(b.o) - discount(a.o) : null,
   }[state.sort];
@@ -292,6 +293,8 @@ function chainColor(id, fallback) {
 function validText(o) {
   const now = Date.now();
   if (o.from && o.from > now) return `<span class="soon">Fra ${esc(dayFmt.format(o.from))}</span>`;
+  if (o.till && new Date(o.till).toDateString() === new Date(now).toDateString()) return '<span class="soon">Siste dag i dag</span>';
+  if (o.from && o.till) return `${esc(dayFmt.format(o.from))}–${esc(dayFmt.format(o.till))}`;
   if (o.till) return `Til ${esc(dayFmt.format(o.till))}`;
   return '';
 }
@@ -300,6 +303,8 @@ function unitText(o) {
   if (!o.unitPrice) return '';
   return `${o.unitFrom ? 'fra ' : ''}${kr(o.unitPrice)}/${o.unit}`;
 }
+/** The big price: "4 for 50 kr" for multi-buy, else the price. */
+const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor}` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
 
 function inList(offerId) {
   return state.list.some((i) => i.offer && i.offer.id === offerId && !i.done);
@@ -326,7 +331,8 @@ function offerCard({ o, fit, because, via }) {
       ${fit >= FIT_MIN && because ? `<div class="why">${whyText(because, via)}</div>` : ''}
     </div>
     <div class="priceblock">
-      <span class="price">${kr(o.price)}</span>
+      <span class="price">${priceText(o)}</span>
+      ${o.pieces ? `<span class="unit">${o.pieces} stk · ${kr(o.perPiece)}/stk</span>` : ''}
       ${o.prePrice && o.prePrice > o.price ? `<span class="pre">${kr(o.prePrice)}</span>` : ''}
       ${o.unitPrice ? `<span class="unit">${unitText(o)}</span>` : ''}
       <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}">${added ? '✓' : '+'}</button>
@@ -339,7 +345,7 @@ function featCard({ o, because, via }) {
   return `<li class="feat">
     ${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
     <div class="ft">${esc(titleCase(o.title))}</div>
-    <div class="fp">${kr(o.price)}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
+    <div class="fp">${priceText(o)}${o.unitPrice ? ` <small>${unitText(o)}</small>` : ''}${o.prePrice && o.prePrice > o.price ? ` <s>${kr(o.prePrice)}</s>` : ''}</div>
     <div class="meta"><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></div>
     <div class="why">${esc(because.name)} · ${because.n}×${via === 'ean' ? ' <span class="via" title="Samme strekkode som på kvitteringene dine">strekkode</span>' : ''}</div>
     <button class="add${added ? ' added' : ''}" type="button" data-add="${esc(o.id)}" aria-label="${added ? 'Ligger i handlelisten' : 'Legg til i handlelisten'}: ${esc(o.title)}">${added ? '✓' : '+'}</button>
@@ -560,7 +566,7 @@ function renderHome() {
   if (feat.length) {
     parts.push(`<section class="home-feat" aria-labelledby="home-feat-h"><h2 id="home-feat-h">Tilbud for deg</h2>
       <ul>${feat.map(({ o }) => `<li><a href="#tilbud" data-gototab="tilbud">${o.img ? `<img src="${esc(o.img)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '<span class="noimg"></span>'}
-        <span class="ft">${esc(titleCase(o.title))}</span><span class="fp">${kr(o.price)}</span><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></a></li>`).join('')}</ul></section>`);
+        <span class="ft">${esc(titleCase(o.title))}</span><span class="fp">${priceText(o)}${o.unitPrice ? ` <small class="fu">${unitText(o)}</small>` : ''}</span><span class="chain" style="--c:${esc(chainColor(o.chainId, o.color))}">${esc(o.chain)}</span></a></li>`).join('')}</ul></section>`);
   }
   body.innerHTML = parts.join('');
 }

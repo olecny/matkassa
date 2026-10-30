@@ -377,4 +377,45 @@ ok(fs.readFileSync(new URL('../.gitignore', import.meta.url), 'utf8').includes('
   ok((await throwing.refresh()).state === STATES.ERROR, 'connection: a provider that throws gives an error state, not a crash');
 }
 
+/* ---------- Kundeprøve 30.10 punkt 1: enhetspris – regresjon med Heges eksempler (FAKE-tilbud, ekte prisformater) ---------- */
+{
+  const T = await import('../js/tjek.js');
+  const g = (pieces, a, b) => ({ unit: { symbol: 'g', si: { symbol: 'kg', factor: 0.001 } }, size: { from: a, to: b || a }, pieces: { from: pieces, to: pieces } });
+  const N = (heading, description, price, quantity = null, pre = null) => T.normalizeOffer({ id: 'FAKE-' + heading, heading, description, pricing: { price, pre_price: pre }, quantity, dealer_id: 'FAKE' });
+  const regal = N('Utvalgte melsorter', 'Regal, 1 kg. 4 for 50,-', 50, g(1, 1000));
+  ok(regal.multi && regal.multi.n === 4 && regal.multi.total === 50 && regal.unitPrice === 12.5 && regal.unit === 'stk', 'Hege: Regal «4 for 50» is 4 for 50 kr and 12,50 kr/stk, not 12,50 kr/kg', JSON.stringify(regal.multi) + regal.unit);
+  const regal4 = N('Utvalgte melsorter', 'Regal. 4 for 50', 50, g(4, 1000));
+  ok(regal4.unitPrice === 12.5 && regal4.unit === 'stk', 'Hege: Regal with Tjek pieces = 4 is still 12,50 kr/stk (no double count)');
+  const perPiece = N('Pålegg', '3 stk for 89,70', 29.9, g(1, 100));
+  ok(perPiece.multi.total === 89.7 && perPiece.unitPrice === 29.9, 'multi-buy: a Tjek price that is already per piece is not divided again');
+  const treFor2 = N('Yoghurt', 'Ta 3 betal for 2. 3 for 2', 20, g(1, 500));
+  ok(treFor2.multi.payFor === 2 && Math.abs(treFor2.unitPrice - 13.33) < 0.01, '«3 for 2»: pay for 2, 13,33 kr/stk');
+  const ris = N('Tine rislunsj/sjokomelk/sunniva', 'Tine, 300 g. Pr kg 40,00', 20, g(1, 300));
+  ok(ris.unitPrice === 40 && ris.unit === 'kg' && ris.unitSrc === 'kjede', 'Hege: Rislunsj shows the chain\'s 40,00 kr/kg, not our 66,67', ris.unitPrice);
+  const makrell = N('King Oscar makrell', '68–110 g. Pr kg fra 220,59', 15, g(1, 68, 110));
+  ok(makrell.unitPrice === 220.59 && makrell.unitFrom && makrell.unitSrc === 'kjede', 'Hege: Makrell shows fra 220,59 kr/kg, not fra 136,36', makrell.unitPrice);
+  const pepsi = N('Pepsi Max', '10 x 0,33 l', 99);
+  ok(pepsi.pieces === 10 && pepsi.perPiece === 9.9 && pepsi.unit === 'l' && pepsi.unitPrice === 30, 'Hege: Pepsi 99 kr is 10 stk · 9,90 kr/stk (30 kr/l)', JSON.stringify([pepsi.pieces, pepsi.perPiece, pepsi.unitPrice]));
+  for (const [d, v, u] of [['72,46/KG', 72.46, 'kg'], ['pr. l 9,89', 9.89, 'l'], ['Kilopris fra 99,50', 99.5, 'kg'], ['kr 12,90 pr boks', 12.9, 'stk'], ['Literpris: 21,90', 21.9, 'l']]) {
+    const p = T.printedUnitPrice(d);
+    ok(p && p.value === v && p.unit === u, `printed unit price: «${d}»`, JSON.stringify(p));
+  }
+  ok(N('Hel kylling', 'Prior, ca. 1,2 kg', 79.9, g(1, 1200)).unitSrc === 'regnet', 'no printed price: our own kr/kg from the size');
+  const gum = N('Extra tyggegummi', '16 g', 10, g(1, 16), 25);
+  ok(gum.unitPrice === 625, 'gum: 625 kr/kg (correct, but…)');
+  // «Beste tilbud» = lowest unit price among ≥ 3 comparable, not the biggest %
+  const it = (id, cat, unitPrice, price, unit = 'kg', extra = {}) => ({ o: { id, unitPrice, unit, price, ...extra }, cat });
+  const items = [
+    it('gum', 'snacks', 625, 10), it('gum2', 'snacks', 700, 12), it('gum3', 'snacks', 900, 15), it('donut', 'snacks', 300, 12),
+    it('kj1', 'kjott', 99, 99), it('kj2', 'kjott', 160, 80), it('kj3', 'kjott', 180, 90), it('kj4', 'kjott', 200, 100),
+    it('melk1', 'meieri', 18, 25, 'l'), it('melk2', 'meieri', 19, 27, 'l'), it('melk3', 'meieri', 20, 28, 'l'),
+    it('honning', 'torr', 100, 40, 'kg', { prePrice: 100 }), it('torr2', 'torr', 90, 30), it('torr3', 'torr', 95, 35),
+  ];
+  const best = T.bestValueIds(items);
+  ok(best.has('kj1') && !best.has('gum') && !best.has('donut') && !best.has('honning') && !best.has('melk1'), 'Beste tilbud: lowest kr/kg among ≥ 3 like offers (≥ 15 % under the median); no small things under 15 kr, not just % off', [...best].join());
+  ok(T.bestValueIds([it('a', 'kjott', 50, 50), it('b', 'kjott', 200, 100)]).size === 0, 'Beste tilbud: needs at least 3 comparable offers');
+  const sorted = [{ unitPrice: 30, unit: 'l', price: 99 }, { unitPrice: 625, unit: 'kg', price: 10 }, { unitPrice: 12.5, unit: 'stk', price: 50 }, { unitPrice: null, price: 5 }, { unitPrice: 40, unit: 'kg', price: 20 }].sort(T.byUnitPrice);
+  ok(sorted.map((o) => o.unit || '-').join() === 'kg,kg,l,stk,-' && sorted[0].unitPrice === 40, 'Laveste pris: by unit price within kg, l and stk, each on its own');
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nAll unit tests passed');
