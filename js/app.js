@@ -306,7 +306,7 @@ function validText(o) {
 
 function unitText(o) {
   if (!o.unitPrice) return '';
-  return `${o.unitFrom ? 'fra ' : ''}${o.multi && o.unit === 'stk' ? 'snitt ' : ''}${kr(o.unitPrice)}/${o.unit}`;
+  return `${o.unitFrom ? 'fra ' : o.unitApprox ? 'ca. ' : ''}${o.multi && o.unit === 'stk' ? 'snitt ' : ''}${kr(o.unitPrice)}/${o.unit}`;
 }
 /** The big price: "4 for 50 kr" for multi-buy, else the price. */
 const priceText = (o) => (o.multi ? (o.multi.payFor ? `${o.multi.n} for ${o.multi.payFor} · ${kr(o.price)}/stk` : `${o.multi.n} for ${kr(o.multi.total)}`) : kr(o.price));
