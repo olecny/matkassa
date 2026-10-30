@@ -388,7 +388,7 @@ function renderOffers() {
     empty.hidden = false;
     empty.innerHTML = state.loading
       ? '<h2>Henter ukens tilbud …</h2><p>Første gang tar det noen sekunder. Etterpå ligger tilbudene lagret, så de vises også uten nett.</p>'
-      : `<h2>Ingen tilbud ennå</h2><p>${navigator.onLine ? 'Klarte ikke å hente tilbud fra Tjek.' : 'Du er frakoblet. Tilbud hentes når du er på nett igjen.'}</p><button class="btn btn-primary" type="button" data-action="refresh">Prøv igjen</button>`;
+      : `<h2>Ingen tilbud ennå</h2><p>${!navigator.onLine ? 'Du er frakoblet. Tilbud hentes når du er på nett igjen.' : state.offersData && !state.error ? 'Kundeavisene har ingen tilbud for området akkurat nå. Prøv igjen senere, eller velg et annet område under Mer.' : 'Klarte ikke å hente tilbud fra Tjek.'}</p><button class="btn btn-primary" type="button" data-action="refresh">Prøv igjen</button>`;
     return;
   }
   const list = filteredOffers();
